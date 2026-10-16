@@ -136,37 +136,63 @@ impl PhotoMetadata {
 
         for entry in raw_exif {
             let name = entry.get("name").and_then(|v| v.as_str()).unwrap_or("");
-            let val = entry.get("value").and_then(|v| v.as_str()).unwrap_or("");
+            let val_entry = entry.get("value");
+            
+            let val_str = val_entry.and_then(|v| v.as_str()).map(|s| s.to_string());
+            let val_num = val_entry.and_then(|v| v.as_f64());
+            let val_u64 = val_entry.and_then(|v| v.as_u64());
+
             match name {
                 "FNumber" | "ApertureValue" => {
-                    meta.aperture_f_number = val.parse::<f32>().ok();
+                    meta.aperture_f_number = val_num
+                        .map(|n| n as f32)
+                        .or_else(|| val_str.as_deref().and_then(|s| s.parse::<f32>().ok()));
                 }
                 "ExposureTime" | "ShutterSpeedValue" => {
-                    meta.shutter_speed = Some(val.to_string());
+                    meta.shutter_speed = val_str.or_else(|| val_num.map(|n| {
+                        if n < 1.0 && n > 0.0 {
+                            format!("1/{}s", (1.0 / n).round() as u64)
+                        } else {
+                            format!("{:.1}s", n)
+                        }
+                    }));
                 }
                 "ISOSpeedRatings" | "PhotographicSensitivity" => {
-                    meta.iso = val.parse::<u32>().ok();
+                    meta.iso = val_u64
+                        .map(|u| u as u32)
+                        .or_else(|| val_str.as_deref().and_then(|s| s.parse::<u32>().ok()))
+                        .or_else(|| {
+                            val_entry.and_then(|v| v.as_array()).and_then(|arr| {
+                                arr.first().and_then(|item| item.as_u64().map(|u| u as u32))
+                            })
+                        });
                 }
                 "FocalLength" => {
-                    meta.focal_length_mm = val.split(' ').next().and_then(|s| s.parse::<f32>().ok());
+                    meta.focal_length_mm = val_num
+                        .map(|n| n as f32)
+                        .or_else(|| val_str.as_deref().and_then(|s| {
+                            s.split(' ').next().and_then(|part| part.parse::<f32>().ok())
+                        }));
                 }
                 "Model" if meta.camera_model.is_none() => {
-                    meta.camera_model = Some(val.to_string());
+                    meta.camera_model = val_str;
                 }
                 "Make" => {
-                    meta.camera_make = Some(val.to_string());
+                    meta.camera_make = val_str;
                 }
                 "LensModel" | "LensType" => {
-                    meta.lens_model = Some(val.to_string());
+                    meta.lens_model = val_str;
                 }
                 "ExposureBiasValue" => {
-                    meta.exposure_bias_ev = val.parse::<f32>().ok();
+                    meta.exposure_bias_ev = val_num
+                        .map(|n| n as f32)
+                        .or_else(|| val_str.as_deref().and_then(|s| s.parse::<f32>().ok()));
                 }
                 "MeteringMode" => {
-                    meta.metering_mode = Some(val.to_string());
+                    meta.metering_mode = val_str;
                 }
                 "WhiteBalance" => {
-                    meta.white_balance = Some(val.to_string());
+                    meta.white_balance = val_str;
                 }
                 _ => {}
             }
@@ -601,24 +627,19 @@ fn render_hero_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focuse
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // If pre-rendered protocol exists in cached_protocol, render it
-    if let Some(ref cached) = state.cached_protocol {
-        let img_widget = ratatui_image::Image::new(&cached.protocol);
-        frame.render_widget(img_widget, cached.render_area);
-    } else {
-        // Fallback placeholder
-        let placeholder = Paragraph::new(format!(
-            "\n\n  [ Photographic Preview Canvas ]\n\n  Photo: {}\n  Resolution: {}x{} ({})\n  Camera: {}\n  Exposure: {}\n\n  Press [Space] Split View | [4] 2x2 Matrix | [Z] 1:1 Loupe",
-            state.metadata.file_name,
-            state.metadata.width,
-            state.metadata.height,
-            state.metadata.megapixels_str(),
-            state.metadata.camera_model.as_deref().unwrap_or("Canon EOS R6"),
-            state.metadata.exposure_summary()
-        ))
-        .alignment(Alignment::Center);
-        frame.render_widget(placeholder, inner);
-    }
+    let details = format!(
+        "\n  Archivo Maestro RAW:  {}\n  Dimensiones:          {} x {} píxeles ({})\n  Cámara:               {}\n  Exposición:           {}\n  Ajuste Activo:        {}\n  Intensidad:           {:.0}%\n\n  ────────────────────────────────────────────────────────────\n  Flujo de Trabajo:\n    • Pulse [Tab] para alternar entre BIBLIOTECA y PREVISUALIZADOR\n    • Pulse [4] para ver Matriz de 4 Variantes de Color\n    • Pulse [E] para EXPORTAR variante seleccionada en máxima calidad (TIFF 16b + JPEG 100%)\n",
+        state.metadata.file_name,
+        state.metadata.width,
+        state.metadata.height,
+        state.metadata.megapixels_str(),
+        state.metadata.camera_model.as_deref().unwrap_or("Canon EOS R6"),
+        state.metadata.exposure_summary(),
+        state.active_recipe.name,
+        state.active_intensity * 100.0,
+    );
+    let p = Paragraph::new(details).alignment(Alignment::Left);
+    frame.render_widget(p, inner);
 }
 
 fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_focused: bool) {
@@ -626,7 +647,7 @@ fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_f
 
     for (idx, &sub_area) in rects.iter().enumerate() {
         if let Some(slot) = state.variants.get(idx) {
-            let is_slot_focused = is_focused && (idx == state.focused_variant);
+            let is_selected_slot = idx == state.focused_variant;
             let fav_badge = if slot.is_favorite { " ★" } else { "" };
             let flag_badge = match slot.flag {
                 FlagStatus::Pick => " [P]",
@@ -636,18 +657,42 @@ fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_f
 
             let block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(if is_slot_focused { BorderType::Thick } else { BorderType::Rounded })
-                .border_style(if is_slot_focused {
+                .border_type(if is_selected_slot { BorderType::Thick } else { BorderType::Rounded })
+                .border_style(if is_selected_slot && is_focused {
                     Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                } else if is_selected_slot {
+                    Style::default().fg(Color::Cyan)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 })
-                .title(format!(" {} ({}%){}{} ", slot.label, (slot.intensity * 100.0) as u32, fav_badge, flag_badge));
+                .title(format!(
+                    " {}{}{} ({}%){}{} ",
+                    if is_selected_slot { "► " } else { "" },
+                    slot.index + 1,
+                    if !slot.label.is_empty() { format!(". {}", slot.label) } else { String::new() },
+                    (slot.intensity * 100.0) as u32,
+                    fav_badge,
+                    flag_badge
+                ));
 
             let inner = block.inner(sub_area);
             frame.render_widget(block, sub_area);
 
-            let text = format!("\n  Preset: {}\n  Rating: {}{}\n  Status: {:?}", slot.recipe.name, "★".repeat(slot.rating as usize), "☆".repeat(5 - slot.rating as usize), slot.status);
+            let status_repr = match &slot.status {
+                VariantRenderStatus::Ready => "✔ Listo".to_string(),
+                VariantRenderStatus::Rendering { .. } => "⟳ Generando...".to_string(),
+                VariantRenderStatus::Pending => "⏳ Pendiente".to_string(),
+                VariantRenderStatus::Unloaded => "⏸ Sin cargar".to_string(),
+                VariantRenderStatus::Failed(err) => format!("✖ Error: {}", err),
+            };
+
+            let text = format!(
+                "\n  Preset: {}\n  Rating: {}{}\n  Estado: {}",
+                slot.recipe.name,
+                "★".repeat(slot.rating as usize),
+                "☆".repeat(5 - slot.rating as usize),
+                status_repr
+            );
             let p = Paragraph::new(text).alignment(Alignment::Center);
             frame.render_widget(p, inner);
         }

@@ -1,262 +1,392 @@
-# Guía de Uso, Configuración y Casos de Prueba — LightCraft TUI
+# Guía de Uso, Manual de Usuario y Casos de Prueba — LightCraft TUI
 
-Documentación operativa integral del sistema **LightCraft MCP Rust TUI** (`lightcraft-tui`). Esta guía detalla el funcionamiento del sistema, cómo interactuar con su interfaz de terminal (TUI) y su backend por CLI, cómo configurar recetas/presets (incluyendo B/N y estilos para Instagram en PNG), dónde se guardan las exportaciones, cómo verificar el término de procesos y cómo diagnosticar anomalías en los controles de teclado.
-
----
-
-## 1. Visión General del Sistema
-
-El sistema es una herramienta de automatización fotográfica profesional desarrollada en **Rust** que opera como cliente nativo del motor **LightCraft** a través del protocolo **MCP (Model Context Protocol)**.
-
-### Características Principales:
-* **Integridad Garantizada (Inmutabilidad de Fuentes):** Lectura estricta no destructiva. Los archivos originales en `./DRAW/` (como RAW Canon `.CR3` o imágenes base) nunca se modifican ni se sobrescriben (verificación SHA-256).
-* **Dos Modos de Operación:**
-  * **Modo A (Single Photo):** Inspección detallada, matriz de variantes lado a lado (2, 4 o 6 estilos), vista antes/después (Split/A-B Toggle), histograma y lupa 1:1.
-  * **Modo B (Batch Queue):** Cola de procesamiento por lotes para carpetas completas con control de pausas, reintentos y barras de progreso concurrentes.
-* **Motor de Exportación Multiformato:** Conversión a **PNG**, **JPEG** y **TIFF** con perfiles de escala (resolución completa, borde largo, bounding box o porcentaje), control de calidad, espacio de color y políticas anticolisión.
+Documentación técnica y manual operativo integral del sistema **LightCraft MCP Rust TUI** (`lightcraft-tui`). Esta guía cubre la arquitectura del sistema, manual de usuario paso a paso, navegación por paneles (con teclado y ratón), resolución de eventos de teclado, gestión asíncrona de variantes con timeouts de seguridad, exportación secuencial dual en máxima calidad (TIFF 16-bit + JPEG/PNG), presets fotográficos (incluyendo estilos para Instagram y Blanco/Negro), y una suite completa de casos de prueba.
 
 ---
 
-## 2. Dónde se Guardan las Fotos y Cómo Saber Cuándo Terminó
+## 1. Visión General y Arquitectura
 
-### 2.1. Rutas de Almacenamiento
-* **Directorio por defecto de producción:**  
-  `./dist/client_gallery/` (relativo a la raíz del proyecto).
-* **Directorio de exportación en TUI o CLI personalizada:**  
-  Configurable mediante el parámetro `--output-dir <RUTA>`.  
-  *Ejemplo:* `C:\discolocal\PROYECTOS\PYTHON\LIGTHCRAFT\0001\dist\instagram_png\`
-* **Estructura de nombres generada:**  
-  Sigue la plantilla predeterminada `{name}__{preset}.{ext}` o `{name}__{preset}__{seq:2}.{ext}`.  
-  *Ejemplo:* `IMG_0588__B&W High Contrast.png`.
-* **Archivos originales protegidos:**  
-  Ubicados en `./DRAW/` (permanecen 100% inmutables con hash SHA-256 verificado antes y después).
+El sistema es un procesador y automatizador fotográfico profesional desarrollado en **Rust**, diseñado para interactuar de forma nativa mediante **Model Context Protocol (MCP)** con el motor de revelado de **LightCraft**.
 
-### 2.2. ¿Cómo Saber Cuándo Terminó el Proceso?
-1. **En la TUI (Interfaz de Terminal):**
-   * En la **barra de estado inferior** se muestra el indicador en tiempo real:  
-     `Batch: IMG_0588.CR3 (100.0%) - [X/X]` o mensaje `Ready. [Tab] Focus | [F10] Mode A/B | [Space] Split | [E]xport`.
-   * En el panel de **Modo B (Cola de Lotes)**, el estado de cada trabajo cambia de `Queued` -> `Processing { progress_pct: 100 }` -> `Done`.
-2. **Vía Línea de Comandos (CLI / Automatización):**
-   * En la terminal aparecerá la confirmación final:
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     TUI Interface (ratatui)                     │
+│   [Header: Modos]  │  [Panel 1: Library] │  [Panel 2: Canvas]   │
+│   [Panel 3: Inspector] │  [Bottom: Status Bar & Dynamic Guide]  │
+└───────────────────────────────▲─────────────────────────────────┘
+                                │ Event Loop 60 FPS (crossterm)
+┌───────────────────────────────▼─────────────────────────────────┐
+│                    Application Core Engine                      │
+│  ┌──────────────────────┐               ┌────────────────────┐  │
+│  │ Recipe/Preset Engine │               │  Job & Batch Queue │  │
+│  └──────────────────────┘               └────────────────────┘  │
+│  ┌──────────────────────┐               ┌────────────────────┐  │
+│  │ Image Preview Cache  │               │   Export Pipeline  │  │
+│  └──────────────────────┘               └────────────────────┘  │
+└───────────────────────────────▲─────────────────────────────────┘
+                                │ JSON-RPC / stdio MCP
+┌───────────────────────────────▼─────────────────────────────────┐
+│                     LightCraft MCP Server                       │
+│    (query_photos, render_preview, set_develop, export, ...)     │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Pilares Fundamentales:
+1. **Inmutabilidad Cero-Destrucción (RAW Baseline):** Los archivos fotográficos maestros en `./DRAW/` (como Canon RAW `.CR3` o fuentes de alta resolución) permanecen estrictamente inmutables con comprobación criptográfica SHA-256.
+2. **Arquitectura TUI Desacoplada (60 FPS):** El renderizado nunca se bloquea por la descompresión de imágenes ni por llamadas RPC. Las tareas pesadas corren en subprocesos con canales Tokio MPSC.
+3. **Modos Duales Sin Pérdida de Estado:** Alternancia fluida con `F10` o `m` entre el **Modo A** (Inspección y variantes individuales) y el **Modo B** (Cola de procesamiento por lotes).
+
+---
+
+## 2. Novedades y Mejoras Recientes en el Repositorio
+
+A raíz de los requerimientos de usabilidad e incidencias detectadas en Windows, el repositorio incorpora las siguientes optimizaciones críticas:
+
+### 2.1. Eliminación del "Doble Salto" de Teclado en Windows
+* **Causa Raíz:** En consolas de Windows (PowerShell, Windows Terminal, CMD), la API de terminal emite dos eventos por tecla: `KeyEventKind::Press` (al presionar) y `KeyEventKind::Release` (al soltar). Esto provocaba que una sola pulsación disparara dos acciones consecutivas.
+* **Solución Implementada:** El bucle de eventos (`handle_key`) filtra y descarta explícitamente cualquier evento `KeyEventKind::Release`. Ahora cada pulsación se procesa de forma **estrictamente unitaria**, permitiendo una navegación suave y predecible.
+
+### 2.2. Resaltado de Foco y Scroll Sincronizado 1:1
+* **Panel de Biblioteca:** Se implementó una ventana de desplazamiento (*viewport window*). El elemento seleccionado (`selected_index`) permanece siempre visible y centrado en pantalla, evitando que el foco quede oculto fuera del marco.
+* **Indicadores Visuales Claros:**
+  * **Elemento Seleccionado + Panel Enfocado:** Resaltado en **Amarillo Negrita** con cursor `►`.
+  * **Elemento Seleccionado (Panel sin Foco):** Resaltado en **Cian Negrita** (sabes qué foto está activa mientras ajustas controles en otro panel).
+  * **Marco de Paneles Activos:** El panel enfocado muestra un borde grueso de doble línea (`BorderType::Thick`) en color **Cian** con la etiqueta `❯ [ACTIVO] ❮`.
+
+### 2.3. Generación Asíncrona de Variantes con Timeout Watchdog (Anti-Cuelgues)
+* **Antes:** La matriz de variantes podía quedar congelada en "cargando variantes..." si la llamada gráfica tardaba o fallaba silenciosamente.
+* **Ahora:** Cada variante en la matriz se procesa en una tarea asíncrona dedicada (`tokio::spawn`) con un **temporizador de seguridad de 10 segundos**.
+* **Estados Visuales en Pantalla:**
+  * `⏳ Pendiente`: En cola para renderizado.
+  * `⟳ Generando...`: Procesando activamente con medición de tiempo.
+  * `✔ Listo`: Renderizado completado con éxito.
+  * `✖ Error`: Muestra el mensaje exacto de fallo o timeout si supera los 10 segundos, sin congelar la interfaz.
+* **Insignia en Barra de Estado:** Muestra en tiempo real el progreso de las variantes: `[Var: X/Y]` (ej. `[Var: 4/4]`).
+
+### 2.4. Exportación Inmediata en Máxima Calidad con Tecla `[E]`
+* Al pulsar `e` o `E` en el Modo A, el sistema exporta de inmediato la variante o foto activa con los perfiles maestros de máxima fidelidad sin necesidad de configurar diálogos intermedios:
+  1. **TIFF de 16 bits:** Calidad 100%, escala nativa (archival master sin compresión destructiva).
+  2. **JPEG / PNG:** Calidad 100%, escala nativa para previsualización y entrega rápida.
+* **Retroalimentación Inmediata:** La barra de estado reporta el tamaño en megabytes escritos en disco:  
+  `Guardado OK: IMG_0588.CR3 [Variante 2 (Cinema)] (TIFF 16b: 42.1MB, JPEG 100%: 3.8MB)`.
+
+---
+
+## 3. Dónde se Guardan las Fotos y Cómo Saber Cuándo Terminó
+
+### 3.1. Rutas de Almacenamiento
+
+| Tipo de Exportación | Ubicación en Disco | Propósito |
+| :--- | :--- | :--- |
+| **Exportación Rápida Interactiva (`[E]`)** | `./export/interactive/` | Archivos maestros generados al presionar `E` en la TUI (TIFF 16-bit + JPEG/PNG). |
+| **Exportación de Producción / Lotes** | `./dist/client_gallery/` | Salida predeterminada para el procesado masivo o por CLI (`--production-workload`). |
+| **Ruta Personalizada** | Configurable vía `--output-dir <DIR>` | Cualquier carpeta que elijas (ej. `./dist/instagram_png/`). |
+| **Archivos Originales Protegidos** | `./DRAW/` | Fuentes originales (CR3/JPEG). **Nunca se modifican ni se escriben allí exportaciones.** |
+
+### 3.2. Estructura y Plantilla de Nombres
+Los archivos siguen el patrón estructurado:
+```text
+{name}__{preset}.{ext}
+```
+*Ejemplos concretos generados en disco:*
+* `IMG_0588__B&W High Contrast.png`
+* `IMG_0588__Cinema.jpg`
+* `IMG_0588__Natural_TIFF16.tif`
+
+Tokens admitidos por el motor de nombrado:
+* `{name}`: Nombre base del archivo original (sin extensión).
+* `{preset}`: Nombre descriptivo de la receta o preset aplicado.
+* `{seq:2}`: Número secuencial formateado a $N$ dígitos con ceros iniciales.
+* `{date}`: Fecha de captura EXIF UTC (`YYYY-MM-DD`).
+* `{ext}`: Extensión según el contenedor (`png`, `jpg`, `tif`).
+
+### 3.3. ¿Cómo Saber Cuándo Terminó el Proceso?
+1. **En la TUI (Modo A - Foto o Variante Individual):**
+   * Al pulsar `E`, la barra inferior mostrará transitoriamente:  
+     `Exportando IMG_0588.CR3 [Variante X] en máxima calidad...`
+   * Al terminar (generalmente 1 a 3 segundos), cambiará a:  
+     `Guardado OK: IMG_0588.CR3 [Variante X] (TIFF 16b: XX.XMB, JPEG 100%: X.XMB)`
+2. **En la TUI (Modo B - Cola de Lotes):**
+   * La barra de estado indica el porcentaje global y archivo actual:  
+     `Batch: IMG_0589.CR3 (80.0%) - [4/5]`
+   * Cuando todos los ítems están procesados, la cola se detiene y la barra reporta `Ready.`
+3. **Vía Línea de Comandos (CLI Headless):**
+   * Finaliza con un reporte en consola indicando cantidad de archivos y megabytes totales:
      ```text
-     ------------------------------------------------------------
-     SUCCESS: Generated X production images (Y.YY MB) into dist/client_gallery
-     Executing post-flight source immutability verification...
-       [PASS] IMG_0588.CR3 | sha256 verified
+     SUCCESS: Generated 60 production images (184.20 MB) into dist/client_gallery
      SUCCESS: 100% byte-for-byte immutability confirmed across all 5 master files.
      ```
-   * El código de salida del proceso (`ExitCode`) es `0` (Success).
+   * Código de retorno del sistema: `ExitCode::SUCCESS` (`0`).
 
 ---
 
-## 3. Guía de Interfaz (TUI): Atajos de Teclado y Comportamiento Especial
+## 4. Manual de Usuario: Interfaz TUI Paso a Paso
 
-La interfaz está construida con **Ratatui** y **Crossterm** con un loop a 60 FPS.
+### 4.1. Distribución de los Paneles (Layout)
 
-> [!WARNING]
-> ### Explicación del "Bug" de Pulsar 2 Veces (Doble Evento de Teclado en Windows)
-> En consolas de Windows (PowerShell / Windows Terminal / CMD), Crossterm reporta por defecto eventos tanto de **`KeyEventKind::Press`** (tecla pulsada) como de **`KeyEventKind::Release`** o repeticiones de entrada si no se filtran estrictamente por tipo de evento en el loop asíncrono.
-> * **Efecto observado:** Al presionar una tecla, el sistema puede capturar dos eventos seguidos (presionar y soltar), haciendo que una acción toggle (como A/B o selección) cambie y regrese inmediatamente al estado anterior, o que avance 2 posiciones.
-> * **Solución operativa mientras se usa la TUI:** Pulsa las teclas con un toque breve y seco. Si alternas modos (`Tab`, `F10` o `\`), presiona con firmeza o utiliza las opciones CLI automáticas para pruebas repetitivas sin fricción de entrada.
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ LightCraft TUI v0.1.0 │ Modo: SINGLE PHOTO (A) │ Protocolo: Auto (Halfblocks)│
+├─────────────────────┬───────────────────────────────┬────────────────────────┤
+│ 1. BIBLIOTECA       │ 2. PREVISUALIZADOR            │ 3. INSPECTOR           │
+│ (RAW/Imágenes)      │ (Lienzo Central de Variantes) │ (Metadatos y Sliders)  │
+│                     │                               │                        │
+│ ► [x] IMG_0588.CR3  │   [Hero / 2x2 Grid / Split]   │ Foto: IMG_0588.CR3     │
+│   [ ] IMG_0589.CR3  │                               │ 6000x4000 (24.0 MP)    │
+│   [ ] IMG_0590.CR3  │   Variant 1  │  Variant 2     │ 1/500s  f/2.8  ISO 400 │
+│   [ ] IMG_0969.CR3  │   ───────────┼───────────     │ Preset: Cinema         │
+│   [ ] IMG_0981.CR3  │   Variant 3  │  Variant 4     │ Intensidad: 100%       │
+├─────────────────────┴───────────────────────────────┴────────────────────────┤
+│ Foto 1/5 │ Panel Activo: [1. BIBLIOTECA] │ [Tab]: Ir a Canvas │ [E]: Exportar │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
 
-### 3.1. Navegación Global
-| Tecla / Atajo | Acción |
+### 4.2. Cómo Cambiar el Foco entre Paneles
+Puedes cambiar el foco de dos maneras:
+1. **Teclado:** Pulsa `Tab` para avanzar cíclicamente entre `1. BIBLIOTECA` ➔ `2. PREVISUALIZADOR` ➔ `3. INSPECTOR`. Pulsa `Shift + Tab` (`BackTab`) para ir en sentido inverso.
+2. **Ratón:** Haz clic izquierdo dentro de cualquiera de los 3 paneles. El sistema detecta las coordenadas exactas y activa el panel clicado inmediatamente.
+
+### 4.3. Flujo Operativo Completo en Modo A (Inspección y Variantes)
+
+#### Paso 1: Seleccionar la Imagen de Trabajo
+* Haz foco en el panel **1. BIBLIOTECA** (`Tab` o clic).
+* Usa `↑` o `k` para subir, y `↓` o `j` para bajar.
+* Nota cómo el cursor `►` y el texto en amarillo siguen exactamente tu movimiento, y la lista realiza auto-scroll cuando hay más archivos de los que caben en pantalla.
+* *(Opcional)* Pulsa `Espacio` en la biblioteca para marcar la foto para procesamiento posterior en lote (`[x]`).
+
+#### Paso 2: Explorar Diferentes Variantes Visuales
+* Pasa el foco al **2. PREVISUALIZADOR** (`Tab` o clic).
+* Elige el modo de visualización:
+  * Pulsa `1`: Modo **Hero** (imagen en solitario a pantalla completa).
+  * Pulsa `4` (o `v`): Modo **Matriz 2x2** (4 variantes simultáneas).
+  * Pulsa `6`: Modo **Matriz 3x2** (6 variantes simultáneas).
+  * Pulsa `2`: Modo **Matriz de 2 variantes**.
+* El sistema dispara en segundo plano el renderizado de cada estilo. Verás el estado pasar de `⟳ Generando...` a `✔ Listo`.
+
+#### Paso 3: Comparar y Elegir una Variante
+* En la matriz de variantes, usa las flechas `←`, `→`, `↑`, `↓` (o `h`, `j`, `k`, `l`) para moverte entre las miniaturas.
+* El recuadro enfocado se marcará con borde grueso en **Amarillo/Cian**.
+* Pulsa `Enter`: La variante enfocada se convierte en la **receta maestra activa**.
+* Pulsa `\` (Barra invertida): Realiza un cambio instantáneo **A/B** (Antes vs Después) para evaluar el impacto del revelado sobre la foto original.
+* Pulsa `s`: Activa la pantalla dividida (**Split View** lado a lado).
+
+#### Paso 4: Ajustar Intensidad o Calificar
+* Pulsa `[` para bajar la intensidad del preset (de 5% en 5%).
+* Pulsa `]` para subir la intensidad (hasta 150% para un efecto más dramático).
+* Pulsa `Espacio` (con foco en el Canvas) para marcar la variante como favorita (`★`).
+* Pulsa `p` para marcar como Aceptada (**Pick**), `x` para Rechazar (**Reject**), o `u` para quitar marcas (**Unflagged**).
+
+#### Paso 5: Inspeccionar Enfoque y Nitidez (Lupa 1:1)
+* Pulsa `z`: Entra al modo **1:1 Loupe Zoom**.
+* Usa `h`, `j`, `k`, `l` o las flechas de dirección para desplazarte (panorámica) sobre la imagen a escala real y comprobar los detalles en ojos, texturas o grano.
+* Pulsa `z` o `1` nuevamente para regresar a la vista general.
+
+#### Paso 6: Exportación Inmediata
+* Con la foto o variante deseada seleccionada, pulsa `e` o `E`.
+* El sistema generará los archivos en máxima calidad en `./export/interactive/` y te confirmará el éxito en la barra de estado.
+
+---
+
+### 4.4. Flujo Operativo en Modo B (Procesamiento por Lotes)
+
+1. **Entrar al Modo B:** Pulsa `F10` o la tecla `m`.
+2. **Revisar la Cola:** Verás todos los trabajos en cola con su ID, archivo origen, receta y estado.
+3. **Pausar / Reanudar:** Pulsa `Espacio` si necesitas liberar CPU momentáneamente.
+4. **Cancelar:** Pulsa `c` para detener la cola.
+5. **Reintentar:** Pulsa `r` si algún trabajo dio error y deseas reintentarlo.
+6. **Volver a Modo A:** Pulsa `F10` o `m` en cualquier momento (todo el estado de la sesión se preserva intacto).
+
+---
+
+## 5. Tabla Maestra de Atajos de Teclado (Cheat Sheet)
+
+### Globales
+| Atajo | Función |
 | :--- | :--- |
-| `Tab` | Cambiar foco entre paneles: **Biblioteca** (izquierda) ➔ **Lienzo Preview** (centro) ➔ **Presets** (derecha) |
-| `Shift + Tab` (`BackTab`) | Foco en reversa |
-| `F10` o `m` / `M` | Alternar entre **Modo A** (Foto individual) y **Modo B** (Cola de lotes) |
-| `q` o `Ctrl + C` | Salir de la aplicación de forma segura |
+| `Tab` | Avanzar foco: Biblioteca ➔ Lienzo Previsualizador ➔ Inspector |
+| `Shift + Tab` | Retroceder foco de panel |
+| `F10` o `m` / `M` | Alternar entre Modo A (Single) y Modo B (Batch) |
+| `q` o `Ctrl + C` | Salir de LightCraft TUI |
 
-### 3.2. Controles en Modo A (Foto Individual)
-* **Con foco en la Biblioteca (panel izquierdo):**
-  * `↑` / `k`: Foto anterior.
-  * `↓` / `j`: Siguiente foto.
-  * `Espacio`: Marcar/desmarcar foto seleccionada para lote.
-* **Con foco en el Lienzo de Previsualización (panel central):**
-  * `1`: Vista **Hero** (imagen principal a pantalla completa).
-  * `2`: Matriz de **2 variantes** simultáneas.
-  * `4` o `v` / `V`: Matriz de **4 variantes** (2x2 cuadrícula comparativa).
-  * `6`: Matriz de **6 variantes** simultáneas.
-  * `s` / `S`: Vista dividida Antes/Después (**Split View** lado a lado).
-  * `\` (Barra invertida): Alternar instantáneamente **A/B** (Antes vs Después con receta activa).
-  * `z` / `Z`: Zoom Lupa 1:1 (**Loupe View** para comprobar nitidez de enfoque).
-  * `h`, `j`, `k`, `l` (o flechas): Desplazar el visor (panorámica) dentro del zoom 1:1.
-  * `←` / `→` (en matriz de variantes): Mover el selector entre las recetas calculadas.
-  * `Enter`: Promover la variante seleccionada como receta maestra activa.
-  * `[` / `]`: Disminuir o aumentar intensidad del preset en pasos de 5% (de 0% a 150%).
-  * `e` / `E`: Exportar foto actual con la receta activa.
-  * `p` / `P`: Marcar foto como Aceptada (**Pick**).
-  * `x` / `X`: Marcar foto como Rechazada (**Reject**).
-  * `u` / `U`: Quitar marcas (**Unflagged**).
+### En Panel 1: Biblioteca
+| Atajo | Función |
+| :--- | :--- |
+| `↑` o `k` | Foto anterior (con scroll automático de lista) |
+| `↓` o `j` | Siguiente foto (con scroll automático de lista) |
+| `Espacio` | Marcar / desmarcar foto para procesamiento por lote (`[x]`) |
 
-### 3.3. Controles en Modo B (Procesamiento por Lotes)
-* `↑` / `k` y `↓` / `j`: Navegar por la lista de trabajos en cola.
-* `Espacio`: Pausar / Reanudar la ejecución de la cola de exportación.
-* `c` / `C`: Cancelar la cola activa.
-* `r` / `R`: Reintentar trabajos fallidos.
+### En Panel 2: Previsualizador (Modo A)
+| Atajo | Función |
+| :--- | :--- |
+| `1` | Vista Hero (previsualización principal completa) |
+| `2` | Matriz de 2 variantes |
+| `4` o `v` / `V` | Matriz 2x2 (4 variantes simultáneas) |
+| `6` | Matriz 3x2 (6 variantes simultáneas) |
+| `←`, `→`, `↑`, `↓` | Navegación entre las celdas de la matriz de variantes |
+| `Enter` | Promover variante seleccionada como receta maestra activa |
+| `s` / `S` | Vista dividida Antes/Después (Split View lado a lado) |
+| `\` | Alternar instantáneamente A/B (Original vs Con Receta) |
+| `z` / `Z` | Alternar Lupa de Enfoque 1:1 (Loupe Zoom) |
+| `h`, `j`, `k`, `l` | Desplazar viewport (panorámica) en la Lupa 1:1 |
+| `Espacio` | Alternar favorita (`★`) en la variante seleccionada |
+| `p` / `P` | Clasificar foto como Aceptada (`[P]`) |
+| `x` / `X` | Clasificar foto como Rechazada (`[X]`) |
+| `u` / `U` | Limpiar clasificación (`Unflagged`) |
+| `[` / `]` | Modificar intensidad de la receta (-5% / +5%) |
+| `e` / `E` | **Exportar en máxima calidad (TIFF 16b + JPEG/PNG) a `./export/interactive/`** |
+
+### En Modo B (Cola de Lotes)
+| Atajo | Función |
+| :--- | :--- |
+| `↑` / `k` y `↓` / `j` | Navegar por la tabla de trabajos encolados |
+| `Espacio` | Alternar Pausa / Reanudación de la cola |
+| `c` / `C` | Cancelar todos los trabajos pendientes de la cola |
+| `r` / `R` | Reintentar únicamente los trabajos que hayan fallado |
 
 ---
 
-## 4. Caso Práctico: Exportar para Instagram (10 Estilos en PNG)
+## 6. Caso de Uso Práctico: Exportación para Instagram (Solo PNG y 10 Estilos)
 
-Para publicar en Instagram necesitas imágenes optimizadas en formato PNG, con recorte o límite de borde largo (usualmente **1080px** o **2048px** para mantener la máxima fidelidad) y una variedad estética que incluya Blanco y Negro y otros acabados estilizados.
+Para Instagram se busca mantener máxima nitidez en compresión de feeds y stories, evitando artefactos JPEG mediante **PNG**, escalando a un ancho óptimo de **1080px** o **2048px** en el borde largo.
 
-### 4.1. Catálogo de Estilos y Presets Disponibles
+### 6.1. Los 10 Estilos Recomendados (B/N y Color)
 
-El sistema integra recetas maestras de revelado (y admite presets personalizados en TOML/JSON):
+1. **`bw-high-contrast` (B&W High Contrast):** Blanco y negro de alto impacto con curva tonal en S, negros puros y textura pronunciada en ropa y piel.
+2. **`bw-soft-portrait` (B&W Suave Tonos Medios):** Retrato clásico con negros suaves, altas luces aireadas y grano fino cinematográfico.
+3. **`bw-film-noir` (B&W Film Noir):** Viñeteado denso, sombras profundas y contraste angular para fotografía callejera y arquitectura.
+4. **`natural` (Natural Master):** Revelado limpio y neutro, respetando la colorimetría de pieles y paisaje con corrección cromática.
+5. **`cinema` (Cinematic Look):** Verdes oliva atenuados, tonos de piel cobrizos y sombras frías azuladas estilo largometraje.
+6. **`teal-orange` (Teal & Orange):** Clásico contraste complementario: cielos y sombras turquesa, reflejos y tonos cálidos en el sujeto.
+7. **`golden-hour` (Golden Hour / Atardecer):** Desplazamiento de temperatura cálida (+1000K), sombras abiertas con halo dorado en los bordes.
+8. **`vintage-fade` (Vintage Matte):** Curva tonal con punto negro levantado (sombras lavadas y mate) con toque cálido analógico.
+9. **`urban-moody` (Urban Moody):** Desaturación selectiva de verdes y azules, resaltando acentos amarillos y rojos para street photography.
+10. **`clean-minimal` (Clean Pastel):** Tonos pasteles, altas luces muy limpias, bajo contraste general para composiciones arquitectónicas y minimalistas.
 
-1. **`bw-high-contrast` (B&W High Contrast):** Blanco y negro de alto impacto con curva tonal profunda, negros densos y claridad acentuada.
-2. **`bw-soft-portrait` (B&W Soft / Tonos Medios):** Tratamiento monocromático suave con grano analógico sutil y reducción de microcontraste.
-3. **`bw-film-noir` (B&W Film Noir):** Viñeteado clásico, sombras comprimidas y altas luces controladas.
-4. **`natural` (Natural):** Colorimetría limpia, fidelidad de tonos de piel, microcontraste y enfoque de exportación.
-5. **`cinema` (Cinematic Look):** Verdes desaturados, tonos cálidos en piel, sombras azuladas y rolloff suave en altas luces.
-6. **`teal-orange` (Teal & Orange):** Separación complementaria icónica: sombras cian/turquesa y pieles doradas cálidas.
-7. **`golden-hour` (Golden Hour):** Temperatura cálida (+1000K), sombras levantadas con resplandor dorado en reflejos.
-8. **`vintage-fade` (Vintage / Retro Fade):** Punto negro elevado (sombras lavadas estilo película química) y ligero tinte sepia.
-9. **`urban-moody` (Urban Moody):** Darks profundos, saturación selectiva (resaltando amarillos y rojos) y textura marcada.
-10. **`clean-minimal` (Clean Minimal / Modern Pastel):** Tonos pasteles, altas luces aireadas y baja saturación general.
+### 6.2. Creación de Preset en Formato TOML
+Puedes añadir cualquiera de estos estilos creando un archivo `.toml` en la carpeta de presets (por defecto `~/.config/lightcraft-tui/presets/` o pasando `--presets-dir <DIR>`):
 
-### 4.2. Cómo crear un Preset Personalizado en TOML
-Los presets de usuario se guardan en el directorio local de presets (`~/.config/lightcraft-tui/presets/` o `--presets-dir ./presets/`).
-
-Ejemplo de archivo de preset (`presets/bw-film-noir.toml`):
+Ejemplo: `presets/instagram-bw-noir.toml`
 ```toml
 [metadata]
-id = "bw-film-noir"
-name = "B&W Film Noir"
-description = "Monocromo con negros profundos y viñeteado de época para redes sociales"
+id = "instagram-bw-noir"
+name = "Instagram B&W Noir"
+description = "Monocromo con sombras profundas y textura optimizado para feed vertical de IG"
 version = 1
-author = "Usuario"
-category = "Monochrome"
-created_at = "2026-10-15T12:00:00Z"
-modified_at = "2026-10-15T12:00:00Z"
+author = "Fotografo"
+category = "BlackAndWhite"
+created_at = "2026-10-16T12:00:00Z"
+modified_at = "2026-10-16T12:00:00Z"
 is_builtin = false
 recommended_intensity = 100.0
 
 [recipe]
-name = "B&W Film Noir"
+name = "Instagram B&W Noir"
 treatment = "blackAndWhite"
-exposure = -0.15
-contrast = 35.0
-highlights = -10.0
-shadows = -20.0
-whites = 15.0
-blacks = -30.0
-clarity = 15.0
-dehaze = 10.0
+exposure = -0.10
+contrast = 38.0
+highlights = -15.0
+shadows = -25.0
+whites = 20.0
+blacks = -35.0
+clarity = 18.0
+dehaze = 12.0
 
 [recipe.grain]
-amount = 25.0
-size = 30.0
-roughness = 50.0
+amount = 22.0
+size = 28.0
+roughness = 45.0
 
 [recipe.vignette]
-amount = -35.0
-midpoint = 40.0
+amount = -30.0
+midpoint = 45.0
 roundness = 0.0
-feather = 60.0
+feather = 65.0
 ```
 
 ---
 
-## 5. Batería de Pruebas (Test Cases) para Validar el Sistema
+## 7. Batería de Pruebas y Diagnóstico (Test Cases)
 
-Para descartar fallos, confirmar que los módulos funcionan y verificar que las exportaciones se generan correctamente en disco, ejecuta la siguiente suite de pruebas sistemáticas.
+Ejecuta estas pruebas para descartar fallos y validar que la instalación y el motor de revelado funcionan correctamente en cada escenario.
 
-### Caso de Prueba 1: Prueba de Integridad Cero-Destrucción (RAW Baseline)
-* **Objetivo:** Verificar que el sistema lee los archivos RAW (`.CR3` o fuentes) sin tocarlos ni corromperlos.
+### Caso de Prueba 1: Verificación de Inmutabilidad de Fuentes (RAW Check)
+* **Objetivo:** Asegurar que ninguna operación de lectura o renderizado altera los binarios fuente en `./DRAW/`.
 * **Comando:**
   ```powershell
   cargo run -- --verify-integrity
   ```
-* **Resultado Esperado:**
-  Todos los archivos de `./DRAW/` deben mostrar `[PASS]` y un hash SHA-256 inmutable de 64 caracteres hexadecimales.
+* **Salida esperada:**
+  ```text
+  [PASS] IMG_0588.CR3 | 26527598 bytes | sha256: 09cfa35882260ff0...
+  [PASS] IMG_0589.CR3 | 28369647 bytes | sha256: ecfcbf34289bbdc7...
+  SUCCESS: All 5 Canon CR3 master files verified byte-for-byte against SHA-256 baseline.
+  ```
 
-### Caso de Prueba 2: Verificación de Handshake y Conexión MCP
-* **Objetivo:** Confirmar que el cliente Rust puede comunicarse con el motor LightCraft y listar sus herramientas fotográficas.
+### Caso de Prueba 2: Handshake y Detección de Herramientas MCP
+* **Objetivo:** Verificar que el cliente Rust puede conectarse al motor LightCraft y listar sus 14 herramientas.
 * **Comando:**
   ```powershell
   cargo run -- --check-mcp --mock
   ```
-* **Resultado Esperado:**
-  Imprime `Discovered 14 MCP photographic tools:` listando `import`, `query_photos`, `render_preview`, `cmd_develop_set`, `export`, etc., finalizando con `SUCCESS`.
+* **Salida esperada:**
+  Lista las herramientas fotográficas (`import`, `query_photos`, `set_develop`, `render_preview`, `export`, etc.) y termina en `SUCCESS: MCP connection and tool discovery verified`.
 
-### Caso de Prueba 3: Consulta y Serialización de Presets
-* **Objetivo:** Comprobar la carga del catálogo de estilos y serialización en TOML/JSON.
+### Caso de Prueba 3: Consulta y Validación de Presets
+* **Objetivo:** Comprobar que el motor lee y serializa correctamente las recetas en TOML y JSON.
 * **Comandos:**
   ```powershell
-  # Listar presets disponibles
+  # Listar todos los presets registrados
   cargo run -- --list-presets
 
-  # Consultar detalle en TOML
+  # Consultar preset en TOML
   cargo run -- --show-preset bw-high-contrast --format toml
 
-  # Consultar detalle en JSON
-  cargo run -- --show-preset teal-orange --format json
+  # Consultar preset en JSON
+  cargo run -- --show-preset cinema --format json
   ```
-* **Resultado Esperado:**
-  Muestra una tabla con los IDs de presets (`bw-high-contrast`, `cinema`, etc.) y el volcado de la receta sin errores de parseo.
+* **Salida esperada:**
+  Muestra la tabla del catálogo y las especificaciones numéricas de sliders sin errores de parsing.
 
-### Caso de Prueba 4: Carga de Producción Masiva (Workload Real con RAW Canon CR3)
-* **Objetivo:** Procesar las imágenes de `./DRAW/` con 4 recetas y en 3 formatos distintos (JPEG, PNG y TIFF de 16 bits), verificando dimensiones y bytes escritos.
+### Caso de Prueba 4: Carga de Producción Masiva (Workload Real)
+* **Objetivo:** Procesar los archivos Canon CR3 en 4 presets y 3 formatos simultáneos (JPEG, PNG y TIFF 16-bit).
 * **Comando:**
   ```powershell
-  cargo run -- --production-workload --output-dir dist/test_run
+  cargo run -- --production-workload --output-dir dist/test_instagram
   ```
-* **Resultado Esperado:**
-  1. Supera el pre-flight check de integridad.
-  2. Genera 60 archivos en `dist/test_run/` con nombres formateados (`{name}__{preset}.{ext}`).
-  3. Supera el post-flight check verificando que ningún archivo en `./DRAW/` fue alterado.
+* **Salida esperada:**
+  Genera 60 imágenes en `dist/test_instagram/` y ejecuta inmediatamente la verificación SHA-256 posterior confirmando 100% de inmutabilidad en los archivos de `./DRAW/`.
 
-### Caso de Prueba 5: Prueba de Formato Único (Solo PNG para Instagram)
-* **Objetivo:** Validar la generación de un único formato (PNG) para una foto individual con resolución ajustada a 2048px en el borde largo.
-* **Comportamiento en Pipeline:**
-  * Formato: `OutputFormat::Png`
-  * Profundidad: `BitDepth::Eight` (8 bits por canal sRGB estándar)
-  * Escalado: `ScalingProfile::LongEdge { max_long_edge: 2048, dont_enlarge: true }`
-* **Verificación de archivos:**
+### Caso de Prueba 5: Prueba de la Suite de Tests Automatizados de Rust
+* **Objetivo:** Ejecutar las pruebas unitarias y de integración del motor, verificando el layout, eventos de teclado y filtros contra el doble trigger.
+* **Comandos recomendados:**
   ```powershell
-  Get-ChildItem -Path dist\test_run\*.png
-  ```
-  Comprobar que las imágenes se abren correctamente y tienen relación de aspecto idéntica a la original.
+  # 1. Tests unitarios del núcleo (librería)
+  cargo test --lib
 
-### Caso de Prueba 6: Suite Completa de Tests Automatizados de Rust
-* **Objetivo:** Ejecutar la batería de pruebas unitarias y de integración del proyecto (módulos de naming, collision, MCP, presets y export).
-* **Comando:**
-  ```powershell
-  cargo test
+  # 2. Tests de layout, foco y eventos de teclado
+  cargo test --test tier1_tui_layout_tests
+
+  # 3. Tests de integridad y sandboxing
+  cargo test --test tier2_boundary_tests
   ```
-* **Resultado Esperado:**
-  Todos los tests deben reportar `test result: ok`.
+* **Salida esperada:**
+  Todos los casos deben mostrar `test result: ok`.
 
 ---
 
-## 6. Diagnóstico de Problemas Frecuentes (Troubleshooting)
+## 8. Diagnóstico de Problemas Frecuentes (FAQ & Troubleshooting)
 
-| Síntoma | Causa Raíz | Solución |
-| :--- | :--- | :--- |
-| Al presionar una tecla en la TUI salta 2 elementos | En terminales Windows, Crossterm procesa tanto `KeyPress` como `KeyRelease` en ráfaga rápida. | Efectúa pulsaciones breves. Para pruebas automatizadas de exportación, utiliza los comandos directos por CLI (`--production-workload`). |
-| Error `PathTraversal` al exportar | La ruta solicitada contiene `..` o caracteres inválidos de Windows. | Especifica rutas limpias y absolutas o relativas directas (ejemplo: `dist/export_ig`). |
-| "Live lightcraft-cli.exe not found on system" | El binario ejecutable externo de LightCraft no está en el PATH del sistema. | La aplicación pasa automáticamente a modo **Mock**, permitiendo renderizar previews y exportar usando el motor interno de Rust sin interrumpir la sesión. |
-| La imagen en la terminal se ve como caracteres de bloque | La terminal no soporta Kitty Graphics Protocol ni Sixel. | Es el comportamiento normal de fallback mediante **Halfblocks Unicode**. Para gráficos de alta resolución nativos en terminal, utiliza emuladores compatibles como Ghostty o WezTerm. |
+### P: ¿Por qué antes parecía que tenía que pulsar dos veces una tecla o saltaba dos fotos?
+**R:** En Windows, la consola enviaba el evento de soltar la tecla (`KeyRelease`). Con la versión actualizada en el repositorio, la aplicación ignora explícitamente los eventos `Release`. Ahora solo responde a pulsaciones (`Press`), eliminando cualquier comportamiento errático.
 
----
+### P: ¿Qué pasa si al generar variantes una imagen se demora o se bloquea?
+**R:** El sistema cuenta con un *watchdog* que monitorea cada variante. Si el renderizado supera los 10 segundos, cancela la tarea, libera el hilo y marca la variante como `✖ Error: Tiempo de espera agotado (>10s)`. Tu interfaz nunca se congelará.
 
-## 7. Resumen de Comandos Rápidos de Verificación
+### P: ¿Dónde encuentro exactamente las imágenes que exporté con la tecla `[E]`?
+**R:** Se guardan en la carpeta `./export/interactive/` en la raíz de este proyecto. Se crean dos archivos por cada exportación: un archivo `.tif` (TIFF sin compresión de 16 bits para archivo fotográfico profesional) y un archivo `.jpg` (o `.png` según la configuración del preset) al 100% de calidad.
 
-```powershell
-# 1. Verificar integridad de las fotos de origen
-cargo run -- --verify-integrity
+### P: ¿Puedo usar el ratón para seleccionar cosas en la TUI?
+**R:** Sí. Puedes hacer clic izquierdo dentro del panel de **Biblioteca**, del **Previsualizador** o del **Inspector** para transferir el foco inmediatamente a ese panel sin necesidad de usar `Tab`.
 
-# 2. Comprobar catálogo de presets disponibles
-cargo run -- --list-presets
-
-# 3. Lanzar TUI interactiva
-cargo run -- --tui
-
-# 4. Lanzar TUI forzando modo simulación (offline)
-cargo run -- --tui --mock
-
-# 5. Ejecutar exportación de lote a carpeta personalizada
-cargo run -- --production-workload --output-dir dist/instagram_png
-```
+### P: ¿Por qué en mi terminal las fotos se ven como rectángulos de colores o caracteres Unicode?
+**R:** Si utilizas el CMD clásico de Windows o PowerShell sin soporte gráfico nativo, la TUI utiliza el protocolo de fallback seguro **Halfblocks Unicode** (bloques de medios caracteres con color de 24 bits). Si deseas gráficos nativos de alta resolución en la terminal, ejecuta la TUI en terminales modernas que soporten Kitty Graphics Protocol o Sixel (como Ghostty o WezTerm).

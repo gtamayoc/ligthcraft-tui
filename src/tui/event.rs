@@ -33,6 +33,18 @@ pub enum AppEvent {
         recipe_hash: u64,
         image: Arc<DynamicImage>,
     },
+    /// Asynchronously rendered variant preview for a specific slot.
+    VariantReady {
+        photo_id: String,
+        slot_index: usize,
+        image: Arc<DynamicImage>,
+    },
+    /// Asynchronous error during variant generation for a specific slot.
+    VariantFailed {
+        photo_id: String,
+        slot_index: usize,
+        error: String,
+    },
     /// Batch progress update from worker pool.
     BatchProgress {
         completed: usize,

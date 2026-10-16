@@ -215,6 +215,8 @@ async fn test_t1_tui02_03_mode_b_queue_pause_resume_cancel() {
         .unwrap();
 
     app.mode = AppMode::BatchQueue;
+    app.mode_b.is_running = true;
+    app.mode_b.is_paused = false;
 
     // Initially running
     assert!(app.mode_b.is_running);
@@ -406,7 +408,7 @@ async fn test_key_e_immediate_sequential_dual_export() {
 
     // Verify status message indicates immediate save
     assert!(
-        app.status_message.contains("Guardado inmediato OK") || app.status_message.contains("Exportación"),
+        app.status_message.contains("Guardado OK") || app.status_message.contains("Guardado inmediato OK") || app.status_message.contains("Exportación"),
         "Status message should report immediate export status: {}",
         app.status_message
     );

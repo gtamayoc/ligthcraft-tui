@@ -464,10 +464,10 @@ async fn test_adv_m4_08_rapid_50_pause_resume_cycles_during_active_execution() {
 
         let photos = vec![
             ScannedPhoto {
-                path: PathBuf::from("DRAW/IMG_0588.CR3"),
-                filename: "IMG_0588.CR3".into(),
+                path: PathBuf::from("DRAW/IMG_0969.CR3"),
+                filename: "IMG_0969.CR3".into(),
                 extension: "cr3".into(),
-                size_bytes: 26_527_598,
+                size_bytes: 26_614_589,
                 is_cr3: true,
                 is_selected: true,
                 dimensions: Some((6000, 4000)),
@@ -475,21 +475,10 @@ async fn test_adv_m4_08_rapid_50_pause_resume_cycles_during_active_execution() {
                 aspect_ratio: Some(AspectRatio::Ratio3x2),
             },
             ScannedPhoto {
-                path: PathBuf::from("DRAW/IMG_0589.CR3"),
-                filename: "IMG_0589.CR3".into(),
+                path: PathBuf::from("DRAW/IMG_0981.CR3"),
+                filename: "IMG_0981.CR3".into(),
                 extension: "cr3".into(),
-                size_bytes: 26_527_598,
-                is_cr3: true,
-                is_selected: true,
-                dimensions: Some((6000, 4000)),
-                orientation: Some(Orientation::Landscape),
-                aspect_ratio: Some(AspectRatio::Ratio3x2),
-            },
-            ScannedPhoto {
-                path: PathBuf::from("DRAW/IMG_0590.CR3"),
-                filename: "IMG_0590.CR3".into(),
-                extension: "cr3".into(),
-                size_bytes: 26_527_598,
+                size_bytes: 29_087_028,
                 is_cr3: true,
                 is_selected: true,
                 dimensions: Some((6000, 4000)),
@@ -500,7 +489,18 @@ async fn test_adv_m4_08_rapid_50_pause_resume_cycles_during_active_execution() {
                 path: PathBuf::from("DRAW/IMG_0969.CR3"),
                 filename: "IMG_0969.CR3".into(),
                 extension: "cr3".into(),
-                size_bytes: 26_527_598,
+                size_bytes: 26_614_589,
+                is_cr3: true,
+                is_selected: true,
+                dimensions: Some((6000, 4000)),
+                orientation: Some(Orientation::Landscape),
+                aspect_ratio: Some(AspectRatio::Ratio3x2),
+            },
+            ScannedPhoto {
+                path: PathBuf::from("DRAW/IMG_0981.CR3"),
+                filename: "IMG_0981.CR3".into(),
+                extension: "cr3".into(),
+                size_bytes: 29_087_028,
                 is_cr3: true,
                 is_selected: true,
                 dimensions: Some((6000, 4000)),
@@ -586,10 +586,10 @@ async fn test_adv_m4_09_rapid_concurrent_pause_resume_cancel_race_resilience() {
 
         let photos = vec![
             ScannedPhoto {
-                path: PathBuf::from("DRAW/IMG_0588.CR3"),
-                filename: "IMG_0588.CR3".into(),
+                path: PathBuf::from("DRAW/IMG_0969.CR3"),
+                filename: "IMG_0969.CR3".into(),
                 extension: "cr3".into(),
-                size_bytes: 26_527_598,
+                size_bytes: 26_614_589,
                 is_cr3: true,
                 is_selected: true,
                 dimensions: Some((6000, 4000)),
@@ -597,10 +597,10 @@ async fn test_adv_m4_09_rapid_concurrent_pause_resume_cancel_race_resilience() {
                 aspect_ratio: Some(AspectRatio::Ratio3x2),
             },
             ScannedPhoto {
-                path: PathBuf::from("DRAW/IMG_0589.CR3"),
-                filename: "IMG_0589.CR3".into(),
+                path: PathBuf::from("DRAW/IMG_0981.CR3"),
+                filename: "IMG_0981.CR3".into(),
                 extension: "cr3".into(),
-                size_bytes: 26_527_598,
+                size_bytes: 29_087_028,
                 is_cr3: true,
                 is_selected: true,
                 dimensions: Some((6000, 4000)),
@@ -692,10 +692,10 @@ async fn test_adv_m4_10_queue_deadlock_freedom_under_high_contention() {
 
         let photos = vec![
             ScannedPhoto {
-                path: PathBuf::from("DRAW/IMG_0588.CR3"),
-                filename: "IMG_0588.CR3".into(),
+                path: PathBuf::from("DRAW/IMG_0969.CR3"),
+                filename: "IMG_0969.CR3".into(),
                 extension: "cr3".into(),
-                size_bytes: 26_527_598,
+                size_bytes: 26_614_589,
                 is_cr3: true,
                 is_selected: true,
                 dimensions: Some((6000, 4000)),
@@ -753,7 +753,7 @@ async fn test_adv_m4_11_worker_panic_supervisor_survival_and_continuation() {
     // Job 1: Healthy photo
     let job1 = BatchJob {
         id: 1,
-        source_path: PathBuf::from("DRAW/IMG_0588.CR3"),
+        source_path: PathBuf::from("DRAW/IMG_0969.CR3"),
         photo_id: None,
         recipe: BuiltinPreset::Natural.recipe(),
         recipe_name: "Natural".into(),
@@ -778,7 +778,7 @@ async fn test_adv_m4_11_worker_panic_supervisor_survival_and_continuation() {
 
     let job2_panic = BatchJob {
         id: 2,
-        source_path: PathBuf::from("DRAW/IMG_0589.CR3"),
+        source_path: PathBuf::from("DRAW/IMG_0981.CR3"),
         photo_id: None,
         recipe: BuiltinPreset::Cinema.recipe(),
         recipe_name: "Cinema".into(),
@@ -796,7 +796,7 @@ async fn test_adv_m4_11_worker_panic_supervisor_survival_and_continuation() {
     // Job 3: Healthy photo
     let job3 = BatchJob {
         id: 3,
-        source_path: PathBuf::from("DRAW/IMG_0590.CR3"),
+        source_path: PathBuf::from("DRAW/IMG_0969.CR3"),
         photo_id: None,
         recipe: BuiltinPreset::BwHighContrast.recipe(),
         recipe_name: "B&W".into(),

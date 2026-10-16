@@ -1,0 +1,228 @@
+//! Native EXIF and Image Metadata extraction engine.
+//!
+//! Provides pure-Rust, autonomous extraction of photographic shooting parameters,
+//! dimensions, camera model, lens, and exposure without depending on external daemons or MCP servers.
+
+use std::fs::File;
+use std::io::BufReader;
+use std::path::Path;
+
+use exif::{Field, Reader, Tag, Value};
+
+use crate::tui::mode_a::PhotoMetadata;
+
+/// Extracts photographic metadata directly from a file on disk.
+///
+/// Attempts native EXIF parsing first (via `kamadak-exif`), and falls back
+/// to reading image headers with `image` reader to guarantee accurate dimensions.
+pub fn read_native_metadata(path: &Path) -> PhotoMetadata {
+    let file_name = path
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    let file_size_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+
+    let ext_str = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    let format = match ext_str.as_str() {
+        "cr3" => "Canon RAW CR3".to_string(),
+        "jpg" | "jpeg" => "JPEG".to_string(),
+        "png" => "PNG".to_string(),
+        "tif" | "tiff" => "TIFF".to_string(),
+        "webp" => "WebP".to_string(),
+        other => other.to_uppercase(),
+    };
+
+    let mut meta = PhotoMetadata {
+        file_name,
+        file_size_bytes,
+        format,
+        width: 0,
+        height: 0,
+        orientation: "Normal".to_string(),
+        color_space: "sRGB".to_string(),
+        camera_make: None,
+        camera_model: None,
+        lens_model: None,
+        focal_length_mm: None,
+        aperture_f_number: None,
+        shutter_speed: None,
+        iso: None,
+        exposure_bias_ev: None,
+        metering_mode: None,
+        white_balance: None,
+        capture_time: None,
+    };
+
+    // 1. Try reading EXIF tags directly
+    if let Ok(file) = File::open(path) {
+        let mut bufreader = BufReader::new(file);
+        if let Ok(exif) = Reader::new().read_from_container(&mut bufreader) {
+            for f in exif.fields() {
+                match f.tag {
+                    Tag::Make => {
+                        meta.camera_make = Some(f.display_value().to_string().trim_matches('"').trim().to_string());
+                    }
+                    Tag::Model => {
+                        meta.camera_model = Some(f.display_value().to_string().trim_matches('"').trim().to_string());
+                    }
+                    Tag::LensModel => {
+                        meta.lens_model = Some(f.display_value().to_string().trim_matches('"').trim().to_string());
+                    }
+                    Tag::FocalLength => {
+                        if let Some(fl) = parse_rational_f32(&f.value) {
+                            meta.focal_length_mm = Some(fl);
+                        }
+                    }
+                    Tag::FNumber => {
+                        if let Some(fnum) = parse_rational_f32(&f.value) {
+                            meta.aperture_f_number = Some(fnum);
+                        }
+                    }
+                    Tag::ExposureTime => {
+                        meta.shutter_speed = Some(format_exposure_time(f));
+                    }
+                    Tag::PhotographicSensitivity => {
+                        if let Some(iso) = parse_u32_val(&f.value) {
+                            meta.iso = Some(iso);
+                        }
+                    }
+                    Tag::ExposureBiasValue => {
+                        if let Some(bias) = parse_srational_f32(&f.value) {
+                            meta.exposure_bias_ev = Some(bias);
+                        }
+                    }
+                    Tag::MeteringMode => {
+                        meta.metering_mode = Some(f.display_value().to_string().trim_matches('"').trim().to_string());
+                    }
+                    Tag::WhiteBalance => {
+                        meta.white_balance = Some(f.display_value().to_string().trim_matches('"').trim().to_string());
+                    }
+                    Tag::DateTimeOriginal | Tag::DateTime => {
+                        if meta.capture_time.is_none() {
+                            meta.capture_time = Some(f.display_value().to_string().trim_matches('"').trim().to_string());
+                        }
+                    }
+                    Tag::PixelXDimension => {
+                        if let Some(w) = parse_u32_val(&f.value) {
+                            meta.width = w;
+                        }
+                    }
+                    Tag::PixelYDimension => {
+                        if let Some(h) = parse_u32_val(&f.value) {
+                            meta.height = h;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // 2. If dimensions were not found in EXIF, inspect image headers directly
+    if meta.width == 0 || meta.height == 0 {
+        if let Ok(reader) = image::ImageReader::open(path) {
+            if let Ok(guessed) = reader.with_guessed_format() {
+                if let Ok(dimensions) = guessed.into_dimensions() {
+                    meta.width = dimensions.0;
+                    meta.height = dimensions.1;
+                }
+            }
+        }
+    }
+
+    meta
+}
+
+fn parse_rational_f32(val: &Value) -> Option<f32> {
+    match val {
+        Value::Rational(vec) if !vec.is_empty() => {
+            let r = vec[0];
+            if r.denom != 0 {
+                Some(r.num as f32 / r.denom as f32)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_srational_f32(val: &Value) -> Option<f32> {
+    match val {
+        Value::SRational(vec) if !vec.is_empty() => {
+            let r = vec[0];
+            if r.denom != 0 {
+                Some(r.num as f32 / r.denom as f32)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn parse_u32_val(val: &Value) -> Option<u32> {
+    match val {
+        Value::Short(vec) if !vec.is_empty() => Some(vec[0] as u32),
+        Value::Long(vec) if !vec.is_empty() => Some(vec[0]),
+        _ => None,
+    }
+}
+
+fn format_exposure_time(field: &Field) -> String {
+    match &field.value {
+        Value::Rational(vec) if !vec.is_empty() => {
+            let r = vec[0];
+            if r.num == 1 && r.denom > 1 {
+                format!("1/{}s", r.denom)
+            } else if r.denom != 0 {
+                let sec = r.num as f64 / r.denom as f64;
+                if sec >= 1.0 {
+                    format!("{:.1}s", sec)
+                } else {
+                    let inv = (1.0 / sec).round() as u64;
+                    format!("1/{}s", inv)
+                }
+            } else {
+                "1/---s".to_string()
+            }
+        }
+        _ => field.display_value().to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_read_native_metadata_nonexistent_file() {
+        let meta = read_native_metadata(Path::new("nonexistent_test_photo.jpg"));
+        assert_eq!(meta.file_name, "nonexistent_test_photo.jpg");
+        assert_eq!(meta.format, "JPEG");
+        assert_eq!(meta.width, 0);
+        assert_eq!(meta.height, 0);
+        assert!(meta.camera_model.is_none());
+        assert_eq!(meta.exposure_summary(), "1/---s  f/--  ISO ---  --mm");
+    }
+
+    #[test]
+    fn test_read_native_metadata_fallback_to_image_header() {
+        // Create an uncompressed 100x50 PNG file
+        let mut tmp = NamedTempFile::new().unwrap();
+        let img = image::RgbaImage::new(100, 50);
+        img.write_to(&mut tmp, image::ImageFormat::Png).unwrap();
+
+        let meta = read_native_metadata(tmp.path());
+        assert_eq!(meta.width, 100);
+        assert_eq!(meta.height, 50);
+        assert_eq!(meta.aspect_ratio_str(), "2:1");
+    }
+}

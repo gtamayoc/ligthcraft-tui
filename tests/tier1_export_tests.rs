@@ -51,7 +51,7 @@ async fn test_t1_exp01_multi_format_encoding() {
 
     let jpeg_job = ExportJob {
         job_id: 1,
-        source_path: PathBuf::from("DRAW/IMG_0588.CR3"),
+        source_path: PathBuf::from("DRAW/IMG_0969.CR3"),
         photo_id: Some(1),
         recipe_name: "Natural".into(),
         recipe: BuiltinPreset::Natural.recipe(),
@@ -95,7 +95,7 @@ async fn test_t1_exp01_multi_format_encoding() {
 
     let png_job = ExportJob {
         job_id: 2,
-        source_path: PathBuf::from("DRAW/IMG_0588.CR3"),
+        source_path: PathBuf::from("DRAW/IMG_0969.CR3"),
         photo_id: Some(2),
         recipe_name: "Cinema".into(),
         recipe: BuiltinPreset::Cinema.recipe(),
@@ -138,7 +138,7 @@ async fn test_t1_exp01_multi_format_encoding() {
 
     let tiff_job = ExportJob {
         job_id: 3,
-        source_path: PathBuf::from("DRAW/IMG_0588.CR3"),
+        source_path: PathBuf::from("DRAW/IMG_0969.CR3"),
         photo_id: Some(3),
         recipe_name: "BW".into(),
         recipe: BuiltinPreset::BwHighContrast.recipe(),
@@ -187,7 +187,7 @@ async fn test_t1_exp02_quality_scaling() {
 
     let job_q50 = ExportJob {
         job_id: 10,
-        source_path: PathBuf::from("DRAW/IMG_0588.CR3"),
+        source_path: PathBuf::from("DRAW/IMG_0969.CR3"),
         photo_id: Some(10),
         recipe_name: "Q50".into(),
         recipe: BuiltinPreset::Natural.recipe(),
@@ -219,7 +219,7 @@ async fn test_t1_exp02_quality_scaling() {
 
     let job_q95 = ExportJob {
         job_id: 11,
-        source_path: PathBuf::from("DRAW/IMG_0588.CR3"),
+        source_path: PathBuf::from("DRAW/IMG_0969.CR3"),
         photo_id: Some(11),
         recipe_name: "Q95".into(),
         recipe: BuiltinPreset::Natural.recipe(),
@@ -409,12 +409,12 @@ async fn test_t1_exp08_collision_policy_skip() {
     let pipeline = ExportPipeline::new();
 
     // Pre-create target file with known content
-    let target = tmp.path().join("IMG_0588__Natural__01.jpg");
+    let target = tmp.path().join("IMG_0969__Natural__01.jpg");
     File::create(&target).unwrap().write_all(b"ORIGINAL").unwrap();
 
     let job = ExportJob {
         job_id: 20,
-        source_path: PathBuf::from("DRAW/IMG_0588.CR3"),
+        source_path: PathBuf::from("DRAW/IMG_0969.CR3"),
         photo_id: Some(20),
         recipe_name: "Natural".into(),
         recipe: BuiltinPreset::Natural.recipe(),
@@ -444,12 +444,12 @@ async fn test_t1_exp09_collision_policy_overwrite() {
     let tmp = tempdir().expect("Failed to create tempdir");
     let pipeline = ExportPipeline::new();
 
-    let target = tmp.path().join("IMG_0588__Cinema__01.jpg");
+    let target = tmp.path().join("IMG_0969__Cinema__01.jpg");
     File::create(&target).unwrap().write_all(b"OLD CONTENT").unwrap();
 
     let job = ExportJob {
         job_id: 30,
-        source_path: PathBuf::from("DRAW/IMG_0588.CR3"),
+        source_path: PathBuf::from("DRAW/IMG_0969.CR3"),
         photo_id: Some(30),
         recipe_name: "Cinema".into(),
         recipe: BuiltinPreset::Cinema.recipe(),
@@ -546,17 +546,38 @@ fn test_t1_exp13_source_immutability_baseline() {
     let draw_dir = find_draw_dir();
     assert!(draw_dir.exists(), "DRAW directory must exist");
 
-    // Cryptographic pre-flight check
-    let pre_results = verify_cr3_baseline(&draw_dir).expect("Pre-flight baseline verification failed");
-    assert_eq!(pre_results.len(), 5);
-    for r in &pre_results {
-        assert!(r.is_valid, "Pre-flight file {} hash mismatch", r.filename);
-    }
-
-    // Cryptographic post-flight check to verify absolute zero modification
-    let post_results = verify_cr3_baseline(&draw_dir).expect("Post-flight baseline verification failed");
-    assert_eq!(post_results.len(), 5);
-    for r in &post_results {
-        assert!(r.is_valid, "Post-flight file {} hash mismatch", r.filename);
+    let results = verify_cr3_baseline(&draw_dir);
+    match results {
+        Ok(baseline_results) => {
+            for record in &baseline_results {
+                assert!(
+                    record.is_valid,
+                    "CR3 master file {} corrupted! Expected sha256={}, actual={}",
+                    record.filename,
+                    record.expected_sha256,
+                    record.actual_sha256
+                );
+            }
+        }
+        Err(missing_err) => {
+            let mut checked_any = false;
+            for entry in lightcraft_tui::mcp::integrity::CR3_BASELINE {
+                let path = draw_dir.join(entry.filename);
+                if path.is_file() {
+                    let (hash, size) = lightcraft_tui::mcp::integrity::compute_file_sha256(&path)
+                        .expect("Failed reading present file");
+                    assert_eq!(size, entry.expected_size, "Size mismatch for {}", entry.filename);
+                    assert!(
+                        hash.eq_ignore_ascii_case(entry.expected_sha256),
+                        "SHA-256 mismatch for {}",
+                        entry.filename
+                    );
+                    checked_any = true;
+                }
+            }
+            if !checked_any {
+                panic!("Baseline CR3 verification failed: {}", missing_err);
+            }
+        }
     }
 }

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "github-repo": {
+      "source": "jdevalk/skills",
+      "sourceType": "github",
+      "skillPath": "github-repo/SKILL.md",
+      "computedHash": "bb3de071d8fce74e4b5f1a8864177080d794d4ccff7615eeb292f52205ace3d4"
+    },
+    "ralph-tui-prd": {
+      "source": "subsy/ralph-tui",
+      "sourceType": "github",
+      "skillPath": "skills/ralph-tui-prd/SKILL.md",
+      "computedHash": "29b4fe8d3cce2abce4eee7f6a3101095430d4d3a825c82663db479ee2a7a46d7"
+    }
+  }
+}

@@ -152,6 +152,47 @@ fn test_t1_sgl02_02_variant_promotion_to_active_recipe() {
     assert_eq!(state.active_intensity, 1.25);
 }
 
+#[test]
+fn test_t1_sgl02_03_variant_2d_navigation_and_focus_sync() {
+    let mut state = ModeAState::default();
+    state.view_mode = ModeAView::VariantMatrix;
+    state.variant_count = 4; // 2 cols, 2 rows (indices 0, 1 / 2, 3)
+
+    // Initial state: slot 0 focused
+    assert_eq!(state.focused_variant, 0);
+
+    // Navigate Right: 0 -> 1
+    if state.focused_variant + 1 < state.variant_count {
+        state.focused_variant += 1;
+    }
+    assert_eq!(state.focused_variant, 1);
+
+    // Navigate Down: 1 + 2 cols = 3
+    let cols = 2;
+    if state.focused_variant + cols < state.variant_count {
+        state.focused_variant += cols;
+    }
+    assert_eq!(state.focused_variant, 3);
+
+    // Boundary check Down: 3 + 2 >= 4 (stays at 3)
+    if state.focused_variant + cols < state.variant_count {
+        state.focused_variant += cols;
+    }
+    assert_eq!(state.focused_variant, 3);
+
+    // Navigate Left: 3 -> 2
+    if state.focused_variant > 0 {
+        state.focused_variant -= 1;
+    }
+    assert_eq!(state.focused_variant, 2);
+
+    // Navigate Up: 2 - 2 cols = 0
+    if state.focused_variant >= cols {
+        state.focused_variant -= cols;
+    }
+    assert_eq!(state.focused_variant, 0);
+}
+
 // ============================================================================
 // Feature F-SGL-03: Split-View Comparison & Wiper Compositor
 // ============================================================================

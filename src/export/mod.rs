@@ -335,7 +335,7 @@ impl ExportPipeline {
     }
 
     /// Loads a source photographic asset from disk, either decoding embedded CR3 preview or standard raster formats.
-    fn load_source_image(source_path: &Path, max_dim: Option<u32>) -> Result<image::DynamicImage, ExportError> {
+    pub fn load_source_image(source_path: &Path, max_dim: Option<u32>) -> Result<image::DynamicImage, ExportError> {
         let is_cr3 = source_path
             .extension()
             .and_then(|e| e.to_str())
@@ -400,17 +400,17 @@ impl ExportPipeline {
     ) -> Result<ExportOutcome, ExportError> {
         let start_time = Instant::now();
 
-        // 0. Verify source photo exists on disk
+        // 1. Validate export base folder against traversal and source directory contamination
+        let source_dirs = [PathBuf::from("DRAW")];
+        validate_export_path(&job.output_dir, &source_dirs)?;
+
+        // 2. Verify source photo exists on disk
         if !job.source_path.exists() {
             return Err(ExportError::SourceCorrupted {
                 path: job.source_path.clone(),
                 reason: "Source photographic asset does not exist on disk".into(),
             });
         }
-
-        // 1. Validate export base folder against traversal and source directory contamination
-        let source_dirs = [PathBuf::from("DRAW")];
-        validate_export_path(&job.output_dir, &source_dirs)?;
 
         // 2. Resolve target filename using template
         let base_name = job

@@ -51,53 +51,20 @@ pub struct ModeBState {
 
 impl Default for ModeBState {
     fn default() -> Self {
-        // Populate default demonstration queue items for M3 UI verification
-        let sample_files = ["IMG_0588.CR3", "IMG_0589.CR3", "IMG_0590.CR3", "IMG_0969.CR3", "IMG_0981.CR3"];
-        let sample_recipes = ["Natural", "Cinema", "B&W High Contrast", "Teal & Orange"];
-        let mut queue = Vec::new();
-        let mut id = 1;
-
-        for file in &sample_files {
-            for recipe in &sample_recipes {
-                let status = if id <= 6 {
-                    BatchJobStatus::Done {
-                        output_path: PathBuf::from(format!("export/{}_{}.jpg", file, recipe)),
-                        bytes_written: 4_200_000,
-                        elapsed: Duration::from_millis(420 + id * 30),
-                    }
-                } else if id == 7 {
-                    BatchJobStatus::Processing { progress_pct: 65 }
-                } else {
-                    BatchJobStatus::Queued
-                };
-
-                queue.push(BatchJobStub {
-                    id,
-                    source_path: PathBuf::from(format!("DRAW/{}", file)),
-                    photo_id: Some(id as i64),
-                    recipe_name: recipe.to_string(),
-                    export_profile: "JPEG 92% (1080p)".into(),
-                    status,
-                    enqueued_at: Instant::now(),
-                });
-                id += 1;
-            }
-        }
-
         Self {
             source_dir: PathBuf::from("DRAW"),
-            total_photos_found: 5,
-            strategy_label: "Multi-Recipe Variations (4 variants / photo)".into(),
-            total_jobs: queue.len(),
-            completed_count: 6,
+            total_photos_found: 0,
+            strategy_label: "Cola en espera (Seleccione fotos y agregue a cola)".into(),
+            total_jobs: 0,
+            completed_count: 0,
             failed_count: 0,
-            selected_table_row: 6, // Focused on active running job
-            is_running: true,
+            selected_table_row: 0,
+            is_running: false,
             is_paused: false,
-            start_time: Some(Instant::now()),
-            throughput_imgs_per_sec: 2.4,
-            estimated_remaining: Some(Duration::from_secs(6)),
-            queue,
+            start_time: None,
+            throughput_imgs_per_sec: 0.0,
+            estimated_remaining: None,
+            queue: Vec::new(),
         }
     }
 }

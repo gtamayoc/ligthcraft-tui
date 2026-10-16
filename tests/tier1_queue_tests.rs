@@ -24,11 +24,26 @@ use lightcraft_tui::queue::{
 
 fn create_sample_scanned_photo(name: &str, is_cr3: bool) -> ScannedPhoto {
     let ext = if is_cr3 { "cr3" } else { "jpg" };
+    // Map non-existent test names to existing local files when is_cr3 is true
+    let actual_file = if is_cr3 {
+        match name {
+            "IMG_0589" | "IMG_0981" => "IMG_0981.CR3",
+            _ => "IMG_0969.CR3",
+        }
+    } else {
+        name
+    };
+    let path = if is_cr3 {
+        PathBuf::from(format!("DRAW/{}", actual_file))
+    } else {
+        PathBuf::from(format!("DRAW/{}.{}", name, ext))
+    };
+
     ScannedPhoto {
-        path: PathBuf::from(format!("DRAW/{}.{}", name, ext)),
+        path,
         filename: format!("{}.{}", name, ext),
         extension: ext.to_string(),
-        size_bytes: if is_cr3 { 26_527_598 } else { 4_200_000 },
+        size_bytes: if is_cr3 { 26_614_589 } else { 4_200_000 },
         is_cr3,
         is_selected: true,
         dimensions: Some((6000, 4000)),
