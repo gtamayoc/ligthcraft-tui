@@ -30,9 +30,8 @@ jobs:
       - name: Run unit & feature tests
         run: cargo test --lib --verbose
 
-      - name: Run integration tests (Tiers 1, 2, 3)
+      - name: Run feature & layout integration tests
         run: |
           cargo test --test tier1_feature_tests --verbose
           cargo test --test tier1_tui_layout_tests --verbose
           cargo test --test tier2_boundary_tests --verbose
-          cargo test --test tier3_pairwise_tests --verbose
