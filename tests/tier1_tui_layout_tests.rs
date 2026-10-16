@@ -157,7 +157,9 @@ async fn test_t1_tui02_01_default_launch_state_is_mode_a() {
     assert_eq!(app.focused_pane, PaneId::Library);
     assert_eq!(app.mode_a.view_mode, ModeAView::Hero);
     assert_eq!(app.selected_index, 0);
-    assert!(!app.items.is_empty(), "Items should be discovered from DRAW directory");
+    if PathBuf::from("DRAW").exists() && std::fs::read_dir("DRAW").map(|mut it| it.next().is_some()).unwrap_or(false) {
+        assert!(!app.items.is_empty(), "Items should be discovered from DRAW directory");
+    }
 }
 
 #[tokio::test]
@@ -406,21 +408,30 @@ async fn test_key_e_immediate_sequential_dual_export() {
     };
     app.handle_key(key_e).await.unwrap();
 
-    // Verify status message indicates immediate save
-    assert!(
-        app.status_message.contains("Guardado OK") || app.status_message.contains("Guardado inmediato OK") || app.status_message.contains("Exportación"),
-        "Status message should report immediate export status: {}",
-        app.status_message
-    );
+    // Verify status message indicates immediate save when photo exists, or clean prompt when DRAW is empty
+    if !app.items.is_empty() {
+        assert!(
+            app.status_message.contains("Guardado OK") || app.status_message.contains("Guardado inmediato OK") || app.status_message.contains("Exportación"),
+            "Status message should report immediate export status: {}",
+            app.status_message
+        );
 
-    // Verify output directory has files generated
-    let interactive_dir = PathBuf::from("export").join("interactive");
-    if interactive_dir.exists() {
-        let entries: Vec<_> = std::fs::read_dir(&interactive_dir)
-            .unwrap()
-            .flatten()
-            .collect();
-        assert!(!entries.is_empty(), "Interactive export must create output files immediately");
+        // Verify output directory has files generated
+        let interactive_dir = PathBuf::from("export").join("interactive");
+        if interactive_dir.exists() {
+            let entries: Vec<_> = std::fs::read_dir(&interactive_dir)
+                .unwrap()
+                .flatten()
+                .collect();
+            assert!(!entries.is_empty(), "Interactive export must create output files immediately");
+        }
+    } else {
+        // In clean CI environment without RAW assets
+        assert!(
+            app.status_message.contains("Listo") || app.status_message.contains("Seleccionar"),
+            "Status message should remain clean when no photo is loaded: {}",
+            app.status_message
+        );
     }
 }
 
