@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cargo check all targets
+        run: cargo check --all-targets --verbose
+
+      - name: Run unit & feature tests
+        run: cargo test --lib --verbose
+
+      - name: Run integration tests (Tiers 1, 2, 3)
+        run: |
+          cargo test --test tier1_feature_tests --verbose
+          cargo test --test tier1_tui_layout_tests --verbose
+          cargo test --test tier2_boundary_tests --verbose
+          cargo test --test tier3_pairwise_tests --verbose

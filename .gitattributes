@@ -1,0 +1,26 @@
+# Auto-detect text files and normalize line endings to LF
+* text=auto eol=lf
+
+# Windows batch files must retain CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.tif binary
+*.tiff binary
+*.cr3 binary
+*.CR3 binary
+*.ico binary
+
+# Export-ignore (excluded from release archive archives)
+.github export-ignore
+.gitignore export-ignore
+.gitattributes export-ignore
+.agents export-ignore
+tasks export-ignore
+tests export-ignore
+skills-lock.json export-ignore

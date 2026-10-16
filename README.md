@@ -1,8 +1,9 @@
 # LightCraft TUI 📷⚡
 
+[![CI](https://github.com/gtamayoc/ligthcraft-tui/actions/workflows/ci.yml/badge.svg)](https://github.com/gtamayoc/ligthcraft-tui/actions/workflows/ci.yml)
 [![Rust](https://img.shields.io/badge/rust-1.80%2B-orange.svg?logo=rust)](https://www.rust-lang.org)
 [![Edition](https://img.shields.io/badge/edition-2021-blue.svg)](https://doc.rust-lang.org/edition-guide/rust-2021/)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green.svg)](LICENSE-MIT)
 [![Protocol](https://img.shields.io/badge/MCP-JSON--RPC%202.0-purple.svg)](https://modelcontextprotocol.io/)
 [![Architecture](https://img.shields.io/badge/TUI-Ratatui%200.30-red.svg)](https://github.com/ratatui/ratatui)
 
@@ -141,6 +142,10 @@ lightcraft-tui/
 
 ---
 
-## 📄 Licencia
+## 📄 Licencia y Comunidad
 
-Este proyecto se distribuye bajo los términos de la licencia dual **MIT** o **Apache-2.0**.
+- **Licencia:** Distribuido bajo licencia dual [MIT](LICENSE-MIT) o [Apache-2.0](LICENSE-APACHE).
+- **Guía de Contribución:** Consulta [CONTRIBUTING.md](CONTRIBUTING.md) para configurar el entorno y enviar PRs.
+- **Seguridad:** Revisa nuestra política de divulgación en [SECURITY.md](SECURITY.md).
+- **Código de Conducta:** Adherido a [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+- **Historial de Cambios:** Consulta [CHANGELOG.md](CHANGELOG.md).

@@ -1,0 +1,46 @@
+name: "🐛 Bug Report"
+description: "File an issue about unexpected behavior or errors in LightCraft TUI"
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug report! Please provide as much detail as possible.
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the issue.
+      placeholder: |
+        1. Run `cargo run -- ...`
+        2. Press key '...'
+        3. See error
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment Info
+      description: OS, Terminal emulator, Rust version (`rustc --version`), terminal dimensions.
+      placeholder: |
+        - OS: Windows 11 / Linux / macOS
+        - Terminal: Windows Terminal / WezTerm / Alacritty / iTerm2
+        - Graphics Protocol: Kitty / Sixel / Halfblocks
+        - Rust version: 1.78.0
+    validations:
+      required: false
