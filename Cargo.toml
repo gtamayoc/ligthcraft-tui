@@ -1,0 +1,76 @@
+[package]
+name = "lightcraft-tui"
+version = "0.1.0"
+edition = "2021"
+authors = ["LightCraft Automation Team"]
+description = "High-performance photographic automation TUI with LightCraft MCP integration"
+license = "MIT OR Apache-2.0"
+default-run = "lightcraft-tui"
+
+[dependencies]
+# Async Runtime & Concurrency
+tokio = { version = "1", features = [
+    "rt-multi-thread",
+    "macros",
+    "process",
+    "sync",
+    "time",
+    "io-util",
+    "fs"
+] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# TUI & Terminal Backend
+ratatui = "0.30"
+crossterm = { version = "0.29", features = ["event-stream"] }
+
+# Terminal Image Rendering
+# CRITICAL NOTE FOR WINDOWS COMPATIBILITY:
+# default-features MUST be false to exclude `chafa-dyn` (requires C libchafa via pkg-config).
+# Features ["crossterm", "image-defaults"] provide pure-Rust Kitty, Sixel, iTerm2, and Halfblocks.
+ratatui-image = { version = "11.1.0", default-features = false, features = ["crossterm", "image-defaults"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff", "webp"] }
+
+# Serialization & Protocols
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+base64 = "0.22"
+
+# Cryptographic Integrity (Non-Destructive RAW Verification)
+sha2 = "0.10"
+hex = "0.4"
+
+# CLI & Configuration
+clap = { version = "4.5", features = ["derive", "env"] }
+dirs = "6.0"
+
+# Logging & Telemetry
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-appender = "0.2"
+
+# Error Handling & Utilities
+thiserror = "2.0"
+anyhow = "1.0"
+lru = "0.13"
+chrono = { version = "0.4", features = ["serde"] }
+tempfile = "3.17"
+
+[dev-dependencies]
+tokio-test = "0.4"
+predicates = "3.1"
+assert_cmd = "2.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev]
+opt-level = 0
+debug = true

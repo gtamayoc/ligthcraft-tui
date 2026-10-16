@@ -1,0 +1,39 @@
+# Rust build outputs
+/target/
+**/*.rs.bk
+*.pdb
+
+# Export & generated artifacts
+/export/
+/dist/
+/out/
+*.log
+
+# Heavy RAW camera files & local sample photography
+/DRAW/
+*.CR3
+*.cr3
+*.ARW
+*.arw
+*.NEF
+*.nef
+*.DNG
+*.dng
+
+# Operating System & IDE files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Local agent / scratch transcripts and temporary notes
+.agents/
+1.txt
+*.tmp
+*.bak
+.env
+.env.*
+!.env.example
