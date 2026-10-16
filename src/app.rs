@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -237,6 +237,11 @@ impl AppController {
 
     /// Process keyboard inputs.
     pub async fn handle_key(&mut self, key: KeyEvent) -> Result<(), AppError> {
+        // Discard key release events (prevent double triggers on Windows console)
+        if key.kind == KeyEventKind::Release {
+            return Ok(());
+        }
+
         // Global hotkeys
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {

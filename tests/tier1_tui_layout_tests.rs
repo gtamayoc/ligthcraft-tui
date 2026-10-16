@@ -277,3 +277,58 @@ async fn test_t1_tui02_04_ratatui_test_backend_full_render() {
     assert!(content.contains("Mode A"));
     assert!(content.contains("Library Explorer"));
 }
+
+#[tokio::test]
+async fn test_key_release_events_ignored_preventing_double_trigger() {
+    use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState, KeyCode, KeyModifiers};
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
+        .await
+        .unwrap();
+
+    let initial_pane = app.focused_pane;
+    let initial_mode = app.mode;
+
+    // Simulate Release event of Tab -> should do nothing
+    let release_tab = KeyEvent {
+        code: KeyCode::Tab,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Release,
+        state: KeyEventState::empty(),
+    };
+    app.handle_key(release_tab).await.unwrap();
+    assert_eq!(app.focused_pane, initial_pane, "Release event must be ignored");
+
+    // Simulate Press event of Tab -> should advance exactly 1 pane
+    let press_tab = KeyEvent {
+        code: KeyCode::Tab,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+    app.handle_key(press_tab).await.unwrap();
+    assert_eq!(app.focused_pane, initial_pane.next(), "Press event advances 1 pane");
+
+    // Simulate Release of F10 -> should be ignored
+    let release_f10 = KeyEvent {
+        code: KeyCode::F(10),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Release,
+        state: KeyEventState::empty(),
+    };
+    app.handle_key(release_f10).await.unwrap();
+    assert_eq!(app.mode, initial_mode, "Release of F10 must not switch mode");
+
+    // Simulate Press of F10 -> switches mode
+    let press_f10 = KeyEvent {
+        code: KeyCode::F(10),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+    app.handle_key(press_f10).await.unwrap();
+    assert_ne!(app.mode, initial_mode, "Press of F10 switches mode");
+}
+
