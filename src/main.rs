@@ -75,6 +75,10 @@ pub struct Cli {
     #[arg(long)]
     pub production_workload: bool,
 
+    /// Run sequential photo-by-photo processing with immediate max-quality disk saving (TIFF 16-bit + JPEG 100%)
+    #[arg(long)]
+    pub sequential_export: bool,
+
     /// Output destination folder for production exports (default: dist/client_gallery)
     #[arg(long, default_value = "dist/client_gallery")]
     pub output_dir: PathBuf,
@@ -360,6 +364,160 @@ async fn main() -> ExitCode {
         }
     }
 
+    if cli.sequential_export {
+        had_action = true;
+        println!("============================================================");
+        println!("  LightCraft Secuencial Inmediato (Foto a Foto - Max Calidad)");
+        println!("============================================================");
+        let draw_dir = cli.draw_dir.clone().unwrap_or_else(find_draw_dir);
+        println!("Directorio origen: {}", draw_dir.display());
+        println!("Directorio destino: {}", cli.output_dir.display());
+
+        // Pre-flight check
+        let pre_results = match verify_cr3_baseline(&draw_dir) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Pre-flight verification failed: {}", e);
+                return ExitCode::FAILURE;
+            }
+        };
+        println!("Pre-flight check OK: {} archivos maestros RAW verificados.", pre_results.len());
+
+        let pipeline = export::ExportPipeline::new();
+        let cr3_files = [
+            "IMG_0588.CR3",
+            "IMG_0589.CR3",
+            "IMG_0590.CR3",
+            "IMG_0969.CR3",
+            "IMG_0981.CR3",
+        ];
+
+        let presets = [
+            engine::presets::BuiltinPreset::Natural,
+            engine::presets::BuiltinPreset::Cinema,
+            engine::presets::BuiltinPreset::BwHighContrast,
+            engine::presets::BuiltinPreset::TealOrange,
+        ];
+
+        let mut processed_photos = 0;
+        let mut total_files_generated = 0;
+        let mut total_bytes_saved = 0u64;
+
+        for &cr3_name in &cr3_files {
+            let cr3_path = draw_dir.join(cr3_name);
+            processed_photos += 1;
+            println!("\n[Foto {}/{}] Cargando y procesando: {}", processed_photos, cr3_files.len(), cr3_name);
+
+            for preset in &presets {
+                // 1. Guardar de inmediato Master TIFF 16-bit
+                let tiff_job = export::ExportJob {
+                    job_id: (total_files_generated + 1) as u64,
+                    source_path: cr3_path.clone(),
+                    photo_id: Some((total_files_generated + 1) as i64),
+                    recipe_name: preset.display_name().to_string(),
+                    recipe: preset.recipe(),
+                    profile: export::ExportProfile {
+                        name: format!("{}_TIFF16", preset.display_name()),
+                        format: export::OutputFormat::Tiff,
+                        quality: 100,
+                        bit_depth: export::BitDepth::Sixteen,
+                        scaling: export::ScalingProfile::Native,
+                        ..Default::default()
+                    },
+                    output_dir: cli.output_dir.clone(),
+                    template: export::NamingTemplate::parse("{name}__{preset}.{ext}"),
+                    seq_number: total_files_generated + 1,
+                    collision_policy: export::CollisionPolicy::Overwrite,
+                };
+
+                match pipeline.execute_export(None, &tiff_job).await {
+                    Ok(export::ExportOutcome::Success { bytes_written, output_path, elapsed, .. }) => {
+                        total_files_generated += 1;
+                        total_bytes_saved += bytes_written;
+                        println!(
+                            "  ✓ Guardado inmediato: {:<30} | TIFF 16-bit | {:.1} MB | {:?}",
+                            output_path.file_name().unwrap_or_default().to_string_lossy(),
+                            bytes_written as f64 / 1_048_576.0,
+                            elapsed
+                        );
+                    }
+                    Ok(other) => {
+                        println!("  [AVISO] {:?}", other);
+                    }
+                    Err(e) => {
+                        eprintln!("  [ERROR] Falló exportación TIFF: {}", e);
+                        return ExitCode::FAILURE;
+                    }
+                }
+
+                // 2. Guardar de inmediato Versión JPEG 100%
+                let jpeg_job = export::ExportJob {
+                    job_id: (total_files_generated + 1) as u64,
+                    source_path: cr3_path.clone(),
+                    photo_id: Some((total_files_generated + 1) as i64),
+                    recipe_name: preset.display_name().to_string(),
+                    recipe: preset.recipe(),
+                    profile: export::ExportProfile {
+                        name: format!("{}_JPEG100", preset.display_name()),
+                        format: export::OutputFormat::Jpeg,
+                        quality: 100,
+                        bit_depth: export::BitDepth::Eight,
+                        scaling: export::ScalingProfile::Native,
+                        ..Default::default()
+                    },
+                    output_dir: cli.output_dir.clone(),
+                    template: export::NamingTemplate::parse("{name}__{preset}.{ext}"),
+                    seq_number: total_files_generated + 1,
+                    collision_policy: export::CollisionPolicy::Overwrite,
+                };
+
+                match pipeline.execute_export(None, &jpeg_job).await {
+                    Ok(export::ExportOutcome::Success { bytes_written, output_path, elapsed, .. }) => {
+                        total_files_generated += 1;
+                        total_bytes_saved += bytes_written;
+                        println!(
+                            "  ✓ Guardado inmediato: {:<30} | JPEG 100%  | {:.1} MB | {:?}",
+                            output_path.file_name().unwrap_or_default().to_string_lossy(),
+                            bytes_written as f64 / 1_048_576.0,
+                            elapsed
+                        );
+                    }
+                    Ok(other) => {
+                        println!("  [AVISO] {:?}", other);
+                    }
+                    Err(e) => {
+                        eprintln!("  [ERROR] Falló exportación JPEG: {}", e);
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+        }
+
+        println!("------------------------------------------------------------");
+        println!(
+            "COMPLETADO CON ÉXITO: {} fotos procesadas, {} archivos guardados inmediatamente ({:.2} MB) en {}",
+            processed_photos,
+            total_files_generated,
+            total_bytes_saved as f64 / 1_048_576.0,
+            cli.output_dir.display()
+        );
+
+        // Post-flight immutability verification
+        println!("\nVerificando inmutabilidad post-exportación...");
+        match verify_cr3_baseline(&draw_dir) {
+            Ok(post_results) => {
+                for res in &post_results {
+                    println!("  [PASS] {:<15} | 100% idéntico a SHA-256 baseline", res.filename);
+                }
+                println!("INMUTABILIDAD GARANTIZADA: Ningún archivo RAW original fue modificado.");
+            }
+            Err(e) => {
+                eprintln!("ERROR CRÍTICO: Falló verificación de inmutabilidad: {}", e);
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+
     // Launch TUI mode if explicitly requested, or if interactive terminal and no diagnostic flags
     if cli.tui || (!had_action && std::io::stdout().is_terminal()) {
         had_action = true;
@@ -416,6 +574,7 @@ async fn main() -> ExitCode {
         println!("Use --help for command line options.");
         println!("Available commands:");
         println!("  lightcraft-tui --tui [--graphics <auto|kitty|sixel|halfblocks>] [--mock]");
+        println!("  lightcraft-tui --sequential-export [--output-dir <dir>]");
         println!("  lightcraft-tui --verify-integrity");
         println!("  lightcraft-tui --production-workload [--output-dir <dir>]");
         println!("  lightcraft-tui --check-mcp");

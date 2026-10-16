@@ -275,7 +275,9 @@ async fn test_t1_tui02_04_ratatui_test_backend_full_render() {
 
     assert!(content.contains("LightCraft TUI"));
     assert!(content.contains("Mode A"));
-    assert!(content.contains("Library Explorer"));
+    assert!(content.contains("1. BIBLIOTECA"));
+    assert!(content.contains("3. INSPECTOR"));
+    assert!(content.contains("Panel Activo"));
 }
 
 #[tokio::test]
@@ -331,4 +333,93 @@ async fn test_key_release_events_ignored_preventing_double_trigger() {
     app.handle_key(press_f10).await.unwrap();
     assert_ne!(app.mode, initial_mode, "Press of F10 switches mode");
 }
+
+#[tokio::test]
+async fn test_mouse_focus_bounds_stabilized() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
+        .await
+        .unwrap();
+
+    app.terminal_size = Rect::new(0, 0, 120, 30);
+    let layout = AppLayout::compute(app.terminal_size);
+
+    // Click inside Library panel
+    let lib_x = layout.library_area.x + 2;
+    let lib_y = layout.library_area.y + 2;
+    app.handle_event(lightcraft_tui::tui::event::AppEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: lib_x,
+        row: lib_y,
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    }))
+    .await
+    .unwrap();
+    assert_eq!(app.focused_pane, PaneId::Library);
+
+    // Click inside Inspector panel
+    let insp_x = layout.inspector_area.x + 2;
+    let insp_y = layout.inspector_area.y + 2;
+    app.handle_event(lightcraft_tui::tui::event::AppEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: insp_x,
+        row: insp_y,
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    }))
+    .await
+    .unwrap();
+    assert_eq!(app.focused_pane, PaneId::Inspector);
+
+    // Click outside in header area (y = 0) -> focus must NOT change
+    app.handle_event(lightcraft_tui::tui::event::AppEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 10,
+        row: 0,
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    }))
+    .await
+    .unwrap();
+    assert_eq!(app.focused_pane, PaneId::Inspector, "Header click must not alter focused pane");
+}
+
+#[tokio::test]
+async fn test_key_e_immediate_sequential_dual_export() {
+    use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState, KeyCode, KeyModifiers};
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
+        .await
+        .unwrap();
+
+    // Trigger key 'e' on selected photo
+    let key_e = KeyEvent {
+        code: KeyCode::Char('e'),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+    app.handle_key(key_e).await.unwrap();
+
+    // Verify status message indicates immediate save
+    assert!(
+        app.status_message.contains("Guardado inmediato OK") || app.status_message.contains("Exportación"),
+        "Status message should report immediate export status: {}",
+        app.status_message
+    );
+
+    // Verify output directory has files generated
+    let interactive_dir = PathBuf::from("export").join("interactive");
+    if interactive_dir.exists() {
+        let entries: Vec<_> = std::fs::read_dir(&interactive_dir)
+            .unwrap()
+            .flatten()
+            .collect();
+        assert!(!entries.is_empty(), "Interactive export must create output files immediately");
+    }
+}
+
 

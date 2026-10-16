@@ -144,7 +144,7 @@ impl AppLayout {
                 .borders(Borders::ALL)
                 .border_type(BorderType::Thick)
                 .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-                .title(format!(" ❯ {} ", title))
+                .title(format!(" ❯ [ACTIVO] {} ❮ ", title))
         } else {
             Block::default()
                 .borders(Borders::ALL)

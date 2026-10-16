@@ -59,6 +59,7 @@ pub struct AppController {
     pub mcp_client: Arc<McpClient>,
     pub preset_store: PresetStore,
     pub status_message: String,
+    pub terminal_size: Rect,
     pub needs_render: bool,
     pub running: bool,
 }
@@ -156,6 +157,7 @@ impl AppController {
             mcp_client,
             preset_store,
             status_message: "Ready. [Tab] Focus | [F10] Mode A/B | [Space] Split | [E]xport".into(),
+            terminal_size: Rect::new(0, 0, 120, 30),
             needs_render: true,
             running: true,
         })
@@ -167,6 +169,9 @@ impl AppController {
 
         while self.running {
             if self.needs_render {
+                if let Ok(size) = terminal.size() {
+                    self.terminal_size = Rect::new(0, 0, size.width, size.height);
+                }
                 terminal.draw(|frame| self.render(frame))?;
                 self.needs_render = false;
             }
@@ -194,7 +199,8 @@ impl AppController {
                 self.handle_mouse(mouse);
                 self.needs_render = true;
             }
-            AppEvent::Resize(_, _) => {
+            AppEvent::Resize(w, h) => {
+                self.terminal_size = Rect::new(0, 0, w, h);
                 self.needs_render = true;
             }
             AppEvent::Tick => {
@@ -409,7 +415,79 @@ impl AppController {
             }
             KeyCode::Char('e') | KeyCode::Char('E') => {
                 if let Some(item) = self.items.get(self.selected_index) {
-                    self.status_message = format!("Exported {} with recipe {}", item.filename, self.mode_a.active_recipe.name);
+                    let source_path = item.path.clone();
+                    let file_name = item.filename.clone();
+                    let recipe = self.mode_a.active_recipe.clone();
+                    let preset_name = recipe.name.clone();
+                    let output_dir = PathBuf::from("export").join("interactive");
+                    
+                    self.status_message = format!("Exportando {} en máxima calidad...", file_name);
+                    self.needs_render = true;
+
+                    let pipeline = crate::export::ExportPipeline::new();
+
+                    // 1. Exportar versión maestra TIFF 16-bit archival
+                    let tiff_job = crate::export::ExportJob {
+                        job_id: 1,
+                        source_path: source_path.clone(),
+                        photo_id: None,
+                        recipe_name: preset_name.clone(),
+                        recipe: recipe.clone(),
+                        profile: crate::export::ExportProfile {
+                            name: format!("{}_TIFF16", preset_name),
+                            format: crate::export::OutputFormat::Tiff,
+                            quality: 100,
+                            bit_depth: crate::export::BitDepth::Sixteen,
+                            scaling: crate::export::ScalingProfile::Native,
+                            ..Default::default()
+                        },
+                        output_dir: output_dir.clone(),
+                        template: crate::export::NamingTemplate::parse("{name}__{preset}.{ext}"),
+                        seq_number: 1,
+                        collision_policy: crate::export::CollisionPolicy::Overwrite,
+                    };
+
+                    // 2. Exportar versión JPEG 100% de calidad
+                    let jpeg_job = crate::export::ExportJob {
+                        job_id: 2,
+                        source_path: source_path.clone(),
+                        photo_id: None,
+                        recipe_name: preset_name.clone(),
+                        recipe: recipe.clone(),
+                        profile: crate::export::ExportProfile {
+                            name: format!("{}_JPEG100", preset_name),
+                            format: crate::export::OutputFormat::Jpeg,
+                            quality: 100,
+                            bit_depth: crate::export::BitDepth::Eight,
+                            scaling: crate::export::ScalingProfile::Native,
+                            ..Default::default()
+                        },
+                        output_dir: output_dir.clone(),
+                        template: crate::export::NamingTemplate::parse("{name}__{preset}.{ext}"),
+                        seq_number: 2,
+                        collision_policy: crate::export::CollisionPolicy::Overwrite,
+                    };
+
+                    let res_tiff = pipeline.execute_export(None, &tiff_job).await;
+                    let res_jpeg = pipeline.execute_export(None, &jpeg_job).await;
+
+                    match (res_tiff, res_jpeg) {
+                        (Ok(crate::export::ExportOutcome::Success { bytes_written: b1, .. }),
+                         Ok(crate::export::ExportOutcome::Success { bytes_written: b2, .. })) => {
+                            self.status_message = format!(
+                                "Guardado inmediato OK: {} (TIFF 16b: {:.1}MB, JPEG 100%: {:.1}MB)",
+                                file_name,
+                                b1 as f64 / 1_048_576.0,
+                                b2 as f64 / 1_048_576.0,
+                            );
+                        }
+                        (Err(e), _) | (_, Err(e)) => {
+                            self.status_message = format!("Error al exportar {}: {}", file_name, e);
+                        }
+                        _ => {
+                            self.status_message = format!("Exportación completada con avisos para {}", file_name);
+                        }
+                    }
                 }
             }
 
@@ -458,9 +536,12 @@ impl AppController {
 
     fn handle_mouse(&mut self, mouse: MouseEvent) {
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
-            let layout = AppLayout::compute(Rect::new(0, 0, mouse.column.saturating_add(10), mouse.row.saturating_add(10)));
+            let layout = AppLayout::compute(self.terminal_size);
             if let Some(clicked) = layout.pane_at(mouse.column, mouse.row) {
-                self.focused_pane = clicked;
+                // Solo cambiar foco si se hace clic dentro de uno de los 3 paneles interactivos
+                if [PaneId::Library, PaneId::PreviewCanvas, PaneId::Inspector].contains(&clicked) {
+                    self.focused_pane = clicked;
+                }
             }
         }
     }
@@ -546,7 +627,7 @@ impl AppController {
     }
 
     fn render_library(&self, frame: &mut Frame, area: Rect, layout: &AppLayout) {
-        let block = layout.block_for(PaneId::Library, self.focused_pane, "Library Explorer");
+        let block = layout.block_for(PaneId::Library, self.focused_pane, "1. BIBLIOTECA (Archivos RAW/Imágenes)");
         let list_items: Vec<ListItem> = self
             .items
             .iter()
@@ -580,7 +661,7 @@ impl AppController {
     }
 
     fn render_inspector(&self, frame: &mut Frame, area: Rect, layout: &AppLayout) {
-        let block = layout.block_for(PaneId::Inspector, self.focused_pane, "Recipe Inspector");
+        let block = layout.block_for(PaneId::Inspector, self.focused_pane, "3. INSPECTOR (Presets y Controles de Revelado)");
         let inner = block.inner(area);
         frame.render_widget(block, area);
 
@@ -612,11 +693,22 @@ impl AppController {
     }
 
     fn render_status(&self, frame: &mut Frame, area: Rect) {
+        let active_pane_str = match self.focused_pane {
+            PaneId::Library => "Panel Activo: [1. BIBLIOTECA]",
+            PaneId::PreviewCanvas => "Panel Activo: [2. PREVISUALIZADOR]",
+            PaneId::Inspector => "Panel Activo: [3. INSPECTOR]",
+            PaneId::QueueStatus => "Panel Activo: [COLA/ESTADO]",
+        };
         let selected_count = format!("Photo {}/{} ", self.selected_index + 1, self.items.len().max(1));
         let left_part = Span::styled(selected_count, Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD));
-        let right_part = Span::styled(format!(" {}", self.status_message), Style::default().fg(Color::White).bg(Color::DarkGray));
+        let pane_badge = Span::styled(format!(" {} ", active_pane_str), Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD));
+        let right_part = Span::styled(format!(" {} ", self.status_message), Style::default().fg(Color::White).bg(Color::DarkGray));
+        let help_guide = Span::styled(
+            " | [Tab/Shift+Tab]: Foco 1↔2↔3 | [↑/↓]: Lista | [Espacio]: Sel/Fav | [E]: Exportar Max Calidad | [Q]: Salir ",
+            Style::default().fg(Color::Yellow).bg(Color::Black),
+        );
 
-        let line = Line::from(vec![left_part, right_part]);
+        let line = Line::from(vec![left_part, pane_badge, right_part, help_guide]);
         let p = Paragraph::new(line);
         frame.render_widget(p, area);
     }

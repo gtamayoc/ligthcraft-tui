@@ -590,10 +590,12 @@ fn render_hero_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focuse
         .border_type(if is_focused { BorderType::Thick } else { BorderType::Rounded })
         .border_style(if is_focused { Style::default().fg(Color::Cyan) } else { Style::default().fg(Color::DarkGray) })
         .title(format!(
-            " ❯ Hero View: {} [{} | {}] ",
+            " {}2. PREVISUALIZADOR: {} [{} | {}]{} ",
+            if is_focused { "❯ [ACTIVO] " } else { "" },
             state.metadata.file_name,
             state.metadata.aspect_ratio_str(),
-            state.metadata.megapixels_str()
+            state.metadata.megapixels_str(),
+            if is_focused { " ❮" } else { "" }
         ));
 
     let inner = block.inner(area);
