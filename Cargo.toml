@@ -36,16 +36,16 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 # Serialization & Protocols
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-toml = "0.8"
-base64 = "0.22"
+toml = "1.1"
+base64 = "0.23"
 
 # Cryptographic Integrity (Non-Destructive RAW Verification)
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 
 # CLI & Configuration
 clap = { version = "4.5", features = ["derive", "env"] }
-dirs = "6.0"
+dirs = "7.0"
 
 # Logging & Telemetry
 tracing = "0.1"
@@ -55,7 +55,7 @@ tracing-appender = "0.2"
 # Error Handling & Utilities
 thiserror = "2.0"
 anyhow = "1.0"
-lru = "0.13"
+lru = "0.18"
 chrono = { version = "0.4", features = ["serde"] }
 tempfile = "3.17"
 kamadak-exif = "0.6"
