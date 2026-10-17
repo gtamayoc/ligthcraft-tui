@@ -40,7 +40,7 @@ toml = "0.8"
 base64 = "0.22"
 
 # Cryptographic Integrity (Non-Destructive RAW Verification)
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 
 # CLI & Configuration
