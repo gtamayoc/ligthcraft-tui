@@ -37,7 +37,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
-base64 = "0.22"
+base64 = "0.23"
 
 # Cryptographic Integrity (Non-Destructive RAW Verification)
 sha2 = "0.10"
