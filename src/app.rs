@@ -427,27 +427,6 @@ impl AppController {
                     "Split Toggle: AFTER (Recipe)".into()
                 };
             }
-            KeyCode::Char('z') | KeyCode::Char('Z') => {
-                self.mode_a.view_mode = match self.mode_a.view_mode {
-                    ModeAView::Loupe1to1 => ModeAView::Hero,
-                    _ => ModeAView::Loupe1to1,
-                };
-                self.status_message = format!("Mode A View: {:?}", self.mode_a.view_mode);
-            }
-
-            // Loupe pan navigation
-            KeyCode::Left | KeyCode::Char('h') if self.mode_a.view_mode == ModeAView::Loupe1to1 => {
-                self.mode_a.loupe.pan(-0.05, 0.0);
-            }
-            KeyCode::Right | KeyCode::Char('l') if self.mode_a.view_mode == ModeAView::Loupe1to1 => {
-                self.mode_a.loupe.pan(0.05, 0.0);
-            }
-            KeyCode::Up | KeyCode::Char('k') if self.mode_a.view_mode == ModeAView::Loupe1to1 => {
-                self.mode_a.loupe.pan(0.0, -0.05);
-            }
-            KeyCode::Down | KeyCode::Char('j') if self.mode_a.view_mode == ModeAView::Loupe1to1 => {
-                self.mode_a.loupe.pan(0.0, 0.05);
-            }
 
             // Variant grid navigation (Horizontal & Vertical)
             KeyCode::Left | KeyCode::Char('h') if self.mode_a.view_mode == ModeAView::VariantMatrix => {
@@ -846,10 +825,9 @@ impl AppController {
         };
 
         let help_text = match (self.focused_pane, self.mode_a.view_mode) {
-            (PaneId::Library, _) => " | [↑/↓]: Fotos | [Tab]: Ir a Canvas | [E]: Exportar Max Calidad | [Q]: Salir ",
+            (PaneId::Library, _) => " | [↑/↓]: Fotos | [Space]: Seleccionar | [Tab]: Ir a Canvas | [E]: Exportar Max Calidad | [Q]: Salir ",
             (PaneId::PreviewCanvas, ModeAView::VariantMatrix) => " | [←/→/↑/↓]: Variantes | [Enter]: Promover | [E]: Exportar Variante Max | [1]: Hero | [Q]: Salir ",
-            (PaneId::PreviewCanvas, ModeAView::Loupe1to1) => " | [←/→/↑/↓]: Mover Lupa | [Z/1]: Hero | [E]: Exportar Max Calidad | [Q]: Salir ",
-            (PaneId::PreviewCanvas, _) => " | [4]: Matriz 2x2 | [6]: Matriz 3x2 | [S]: Split | [Z]: 1:1 Loupe | [E]: Exportar Max Calidad | [Q]: Salir ",
+            (PaneId::PreviewCanvas, _) => " | [1]: Hero | [2/4/6]: Matriz Variantes | [S]: Split A/B | [E]: Exportar Max Calidad | [Q]: Salir ",
             (PaneId::Inspector, _) => " | [[]/[]]: Intensidad -/+ | [Tab]: Siguiente Panel | [E]: Exportar Max Calidad | [Q]: Salir ",
             _ => " | [Tab]: Foco 1↔2↔3 | [E]: Exportar Max Calidad | [Q]: Salir ",
         };

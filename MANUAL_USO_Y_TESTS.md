@@ -176,12 +176,7 @@ Puedes cambiar el foco de dos maneras:
 * Pulsa `Espacio` (con foco en el Canvas) para marcar la variante como favorita (`★`).
 * Pulsa `p` para marcar como Aceptada (**Pick**), `x` para Rechazar (**Reject**), o `u` para quitar marcas (**Unflagged**).
 
-#### Paso 5: Inspeccionar Enfoque y Nitidez (Lupa 1:1)
-* Pulsa `z`: Entra al modo **1:1 Loupe Zoom**.
-* Usa `h`, `j`, `k`, `l` o las flechas de dirección para desplazarte (panorámica) sobre la imagen a escala real y comprobar los detalles en ojos, texturas o grano.
-* Pulsa `z` o `1` nuevamente para regresar a la vista general.
-
-#### Paso 6: Exportación Inmediata
+#### Paso 5: Exportación Inmediata
 * Con la foto o variante deseada seleccionada, pulsa `e` o `E`.
 * El sistema generará los archivos en máxima calidad en `./export/interactive/` y te confirmará el éxito en la barra de estado.
 
@@ -222,12 +217,10 @@ Puedes cambiar el foco de dos maneras:
 | `2` | Matriz de 2 variantes |
 | `4` o `v` / `V` | Matriz 2x2 (4 variantes simultáneas) |
 | `6` | Matriz 3x2 (6 variantes simultáneas) |
-| `←`, `→`, `↑`, `↓` | Navegación entre las celdas de la matriz de variantes |
+| `←`, `→`, `↑`, `↓` o `h`, `l`, `k`, `j` | Navegación entre las celdas de la matriz de variantes |
 | `Enter` | Promover variante seleccionada como receta maestra activa |
 | `s` / `S` | Vista dividida Antes/Después (Split View lado a lado) |
 | `\` | Alternar instantáneamente A/B (Original vs Con Receta) |
-| `z` / `Z` | Alternar Lupa de Enfoque 1:1 (Loupe Zoom) |
-| `h`, `j`, `k`, `l` | Desplazar viewport (panorámica) en la Lupa 1:1 |
 | `Espacio` | Alternar favorita (`★`) en la variante seleccionada |
 | `p` / `P` | Clasificar foto como Aceptada (`[P]`) |
 | `x` / `X` | Clasificar foto como Rechazada (`[X]`) |

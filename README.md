@@ -14,17 +14,20 @@
 ## 🌟 Características Principales
 
 - **🖼️ Interfaz TUI de 3 Paneles Sincronizados:**
-  - **1. Biblioteca (Library):** Exploración de catálogo con scroll viewport activo y selección de archivos.
+  - **1. Biblioteca (Library):** Exploración de catálogo con scroll viewport activo, selección de fotos (`[Space]`) y filtrado/etiquetado (`[P]` Pick, `[X]` Reject, `[U]` Unflag).
   - **2. Previsualizador (Preview Canvas):**
-    - Vista Hero principal.
-    - Matriz de Variantes 2×2 (`[4]`) y 3×2 (`[6]`) con navegación bidimensional `[↑/↓/←/→]`.
-    - Modo Split-View Wiper (`[S]`) para comparativa Antes/Después (Before & After).
-    - Modo Lupa 1:1 (`[Z]`) con traslación guiada para inspección de píxeles al 100%.
-  - **3. Inspector de Receta y Metadatos:** Histograma de 4 canales en tiempo real (<2ms) y ajuste fino de intensidad de presets.
+    - Vista Hero principal (`[1]`).
+    - Matriz de Variantes 2 slots (`[2]`), 2×2 (`[4]`) y 3×2 (`[6]`) con navegación bidimensional `[↑/↓/←/→]` o Vim `[h/j/k/l]`.
+    - Modo Split-View Wiper (`[S]`) para comparativa Antes/Después (Before & After) y cambio instantáneo A/B (`[\\]`).
+    - Promoción de variante a receta de trabajo activa (`[Enter]`) y marcado de favoritos (`[Space]`).
+  - **3. Inspector de Receta y Metadatos:** Histograma de 4 canales en tiempo real (<2ms) y ajuste fino de intensidad de presets (`[[]` / `[]]`).
 - **🚀 Exportación Secuencial de Máxima Calidad (`[E]`):**
   - Exportación inmediata de la variante seleccionada con un solo toque:
     - **Archival Master:** TIFF de 16 bits sin pérdida.
     - **Full-Resolution:** JPEG a 100% de calidad.
+- **🔄 Cola de Procesamiento por Lotes (Modo B):**
+  - Cambio inmediato de modo sin pérdida de estado (`[M]` o `[F10]`).
+  - Pausa/Reanudación (`[Space]`), reintento de fallidos (`[R]`) y cancelación (`[C]`).
 - **🔒 Integridad Criptográfica Inmutable (Non-Destructive RAW):**
   - Verificación SHA-256 pre-flight y post-flight.
   - Veto estricto a nivel de motor para garantizar **cero modificaciones o sobreescritura accidental** en los archivos RAW maestros (`DRAW/*.CR3`).
@@ -106,19 +109,49 @@ cargo clippy --all-targets
 
 ## ⌨️ Atajos de Teclado en el TUI
 
-| Tecla | Contexto / Panel | Acción |
+### Navegación Global y Modos
+| Tecla | Contexto | Acción |
 | :--- | :--- | :--- |
-| `[Tab]` | Global | Alternar foco entre paneles (`Biblioteca` ↔ `Previsualizador` ↔ `Inspector`) |
-| `[↑] / [↓]` | Biblioteca | Navegar por la lista de fotos del catálogo |
+| `[Tab]` | Global | Alternar foco cíclico entre paneles (`Biblioteca` ➔ `Previsualizador` ➔ `Inspector`) |
+| `[Shift+Tab]` | Global | Alternar foco en reversa entre paneles |
+| `[M]` / `[F10]` | Global | Alternar entre Modo A (Single Photo Inspector) y Modo B (Batch Queue) |
+| `[Q]` / `[Ctrl+C]` | Global | Salir de la aplicación limpiamente |
+
+### Panel 1: Biblioteca (Library)
+| Tecla | Contexto | Acción |
+| :--- | :--- | :--- |
+| `[↑] / [↓]` o `[k] / [j]` | Biblioteca | Navegar por la lista de fotos del catálogo RAW |
+| `[Space]` | Biblioteca | Alternar selección / marca de la foto |
+
+### Panel 2: Previsualizador (Preview Canvas - Modo A)
+| Tecla | Contexto | Acción |
+| :--- | :--- | :--- |
 | `[1]` | Previsualizador | Modo **Hero** (Vista principal completa) |
-| `[2]` / `[4]` / `[6]` | Previsualizador | Modo **Matriz de Variantes** (2, 4 o 6 slots en cuadrícula) |
-| `[↑/↓/←/→]` | Matriz de Variantes | Navegar entre las variantes disponibles (borde resaltado amarillo) |
+| `[2]` | Previsualizador | Modo **Matriz de 2 Variantes** |
+| `[4]` / `[V]` | Previsualizador | Modo **Matriz de 4 Variantes (2×2)** |
+| `[6]` | Previsualizador | Modo **Matriz de 6 Variantes (3×2)** |
+| `[↑/↓/←/→]` o `[h/j/k/l]` | Matriz de Variantes | Navegar entre las variantes disponibles (borde amarillo resaltado) |
 | `[Enter]` | Matriz de Variantes | Promover la variante seleccionada a receta de trabajo activa |
+| `[Space]` | Previsualizador | Alternar favorito (★) en la variante activa |
+| `[S]` | Previsualizador | Alternar Modo **Split-View** Antes / Después (Before & After) |
+| `[\\]` | Previsualizador | Toggle instantáneo de vista A/B (Antes vs. Receta Activa) |
+| `[P]` | Previsualizador | Etiquetar foto como **Pick** (Aprobada) |
+| `[X]` | Previsualizador | Etiquetar foto como **Reject** (Rechazada) |
+| `[U]` | Previsualizador | Desmarcar etiqueta (**Unflag**) |
 | `[E]` | Previsualizador / Matriz | **Exportar Variante Enfocada a Máxima Calidad** (TIFF 16b + JPEG 100%) |
-| `[S]` | Previsualizador | Modo **Split-View** Antes / Después con divisor wiper |
-| `[Z]` | Previsualizador | Modo **Lupa 1:1** (Zoom de inspección de detalle) |
+
+### Panel 3: Inspector de Receta y Metadatos
+| Tecla | Contexto | Acción |
+| :--- | :--- | :--- |
 | `[[]` / `[]]` | Inspector | Disminuir / Aumentar intensidad de la receta activa (±5%) |
-| `[Q]` | Global | Salir de la aplicación limpiamente |
+
+### Modo B: Cola de Lotes (Batch Queue)
+| Tecla | Contexto | Acción |
+| :--- | :--- | :--- |
+| `[↑] / [↓]` o `[k] / [j]` | Cola Batch | Navegar por la lista de trabajos de exportación |
+| `[Space]` | Cola Batch | Pausar / Reanudar la cola de exportación |
+| `[R]` | Cola Batch | Reintentar trabajos fallidos |
+| `[C]` | Cola Batch | Cancelar la cola batch |
 
 ---
 

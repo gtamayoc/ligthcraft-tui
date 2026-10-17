@@ -489,8 +489,8 @@ async fn test_tier4_workload4_mode_a_interactive_creative_session() {
     state.split_ratio = 0.65;
     assert_eq!(state.split_ratio, 0.65);
 
-    // 6. Test Loupe navigation (1:1 Zoom)
-    state.view_mode = ModeAView::Loupe1to1;
+    // 6. Test Hero transition and crop computation
+    state.view_mode = ModeAView::Hero;
     state.loupe.pan(0.1, -0.1);
     let (cx, cy, cw, ch) = state.loupe.compute_crop_rect(6000, 4000, 1920, 1080);
     assert!(cw <= 6000 && ch <= 4000);

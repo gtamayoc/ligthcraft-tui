@@ -793,7 +793,6 @@ async fn test_adv_m3_05_02_ratatui_render_sweep_all_view_modes_and_terminal_size
         ModeAView::Hero,
         ModeAView::VariantMatrix,
         ModeAView::SplitView,
-        ModeAView::Loupe1to1,
     ];
 
     let split_kinds = [

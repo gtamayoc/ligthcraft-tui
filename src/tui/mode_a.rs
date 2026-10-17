@@ -21,7 +21,6 @@ pub enum ModeAView {
     Hero,
     VariantMatrix,
     SplitView,
-    Loupe1to1,
 }
 
 /// Split-view presentation strategies.
@@ -453,7 +452,6 @@ pub fn render_mode_a(
         ModeAView::Hero => render_hero_view(frame, area, state, is_focused),
         ModeAView::VariantMatrix => render_variant_matrix(frame, area, state, is_focused),
         ModeAView::SplitView => render_split_view(frame, area, state, is_focused),
-        ModeAView::Loupe1to1 => render_loupe_view(frame, area, state, is_focused),
     }
 }
 
@@ -604,54 +602,3 @@ fn render_split_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focus
     }
 }
 
-fn render_loupe_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focused: bool) {
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_type(if is_focused { BorderType::Thick } else { BorderType::Rounded })
-        .border_style(if is_focused { Style::default().fg(Color::Cyan) } else { Style::default().fg(Color::DarkGray) })
-        .title(format!(
-            " ❯ 1:1 Loupe Detail Zoom (Z={:.0}%) Center: ({:.2}, {:.2}) ",
-            state.loupe.zoom_level * 100.0,
-            state.loupe.center_x,
-            state.loupe.center_y
-        ));
-
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-
-    let (crop_x, crop_y, crop_w, crop_h) = state.loupe.compute_crop_rect(
-        state.metadata.width.max(1000),
-        state.metadata.height.max(1000),
-        inner.width as u32 * 10,
-        inner.height as u32 * 20,
-    );
-
-    let text = format!(
-        "\n\n  [ 100% Pixel Inspection Viewport ]\n\n  Crop Box: [x={}, y={}, w={}, h={}]\n  Navigate: [Arrows / h,j,k,l] Pan\n  Zoom: [Z] Exit to Full View\n",
-        crop_x, crop_y, crop_w, crop_h
-    );
-    let p = Paragraph::new(text).alignment(Alignment::Center);
-    frame.render_widget(p, inner);
-
-    // Mini-map locator widget in bottom right
-    if state.loupe.show_minimap && inner.width > 26 && inner.height > 8 {
-        let minimap_area = Rect {
-            x: inner.x + inner.width.saturating_sub(24),
-            y: inner.y + inner.height.saturating_sub(7),
-            width: 22,
-            height: 6,
-        };
-        let minimap_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Yellow))
-            .title(" MiniMap ");
-        let minimap_text = format!(
-            "  [{:^12}]\n  pan: {:.1}, {:.1}",
-            format!("■ {:.0}%", state.loupe.zoom_level * 100.0),
-            state.loupe.center_x,
-            state.loupe.center_y
-        );
-        let minimap_widget = Paragraph::new(minimap_text).block(minimap_block);
-        frame.render_widget(minimap_widget, minimap_area);
-    }
-}
