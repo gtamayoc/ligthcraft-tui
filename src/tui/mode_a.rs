@@ -74,6 +74,7 @@ pub struct VariantSlot {
     pub image: Option<Arc<DynamicImage>>,
     pub cached_protocol: Option<CachedProtocol>,
     pub status: VariantRenderStatus,
+    pub is_selected: bool,
     pub is_favorite: bool,
     pub rating: u8,
     pub flag: FlagStatus,
@@ -90,6 +91,7 @@ impl VariantSlot {
             image: None,
             cached_protocol: None,
             status: VariantRenderStatus::Unloaded,
+            is_selected: false,
             is_favorite: false,
             rating: 0,
             flag: FlagStatus::Unflagged,
@@ -438,6 +440,35 @@ impl ModeAState {
             slot.flag = flag;
         }
     }
+
+    /// Toggle multi-selection on active variant slot.
+    pub fn toggle_selection(&mut self) {
+        if let Some(slot) = self.variants.get_mut(self.focused_variant) {
+            slot.is_selected = !slot.is_selected;
+        }
+    }
+
+    /// Return indices of all selected variants, or fallback to the focused variant if none is selected.
+    pub fn get_selected_or_focused_indices(&self) -> Vec<usize> {
+        let selected: Vec<usize> = self.variants
+            .iter()
+            .take(self.variant_count)
+            .filter(|s| s.is_selected)
+            .map(|s| s.index)
+            .collect();
+        if selected.is_empty() {
+            vec![self.focused_variant]
+        } else {
+            selected
+        }
+    }
+
+    /// Clear all variant multi-selections.
+    pub fn clear_selection(&mut self) {
+        for slot in &mut self.variants {
+            slot.is_selected = false;
+        }
+    }
 }
 
 /// Render Mode A content within the assigned center canvas area.
@@ -492,27 +523,63 @@ fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_f
 
     for (idx, &sub_area) in rects.iter().enumerate() {
         if let Some(slot) = state.variants.get(idx) {
-            let is_selected_slot = idx == state.focused_variant;
+            let is_focused_slot = idx == state.focused_variant;
             let fav_badge = if slot.is_favorite { " ★" } else { "" };
+            let sel_badge = if slot.is_selected { "[X] " } else { "" };
             let flag_badge = match slot.flag {
                 FlagStatus::Pick => " [P]",
-                FlagStatus::Reject => " [X]",
+                FlagStatus::Reject => " [REJ]",
                 FlagStatus::Unflagged => "",
+            };
+
+            // Color sequence logic:
+            // 1. If slot.is_selected: White
+            // 2. If Rendering: Red (en proceso)
+            // 3. If Ready: Green (fin completado, persiste)
+            // 4. If focused slot: Orange (en selección)
+            // 5. Otherwise: DarkGray
+            let border_color = if slot.is_selected {
+                Color::White
+            } else {
+                match &slot.status {
+                    VariantRenderStatus::Rendering { .. } => Color::Red,
+                    VariantRenderStatus::Ready => Color::Green,
+                    VariantRenderStatus::Failed(_) => Color::Magenta,
+                    VariantRenderStatus::Pending | VariantRenderStatus::Unloaded => {
+                        if is_focused_slot {
+                            Color::Rgb(255, 165, 0)
+                        } else {
+                            Color::DarkGray
+                        }
+                    }
+                }
+            };
+
+            // Padding / separación entre cajas de variantes para mejorar legibilidad visual
+            let box_area = if sub_area.width >= 16 && sub_area.height >= 6 {
+                let v_pad = if sub_area.height >= 10 { 1 } else { 0 };
+                Rect {
+                    x: sub_area.x.saturating_add(1),
+                    y: sub_area.y.saturating_add(v_pad),
+                    width: sub_area.width.saturating_sub(2),
+                    height: sub_area.height.saturating_sub(v_pad * 2),
+                }
+            } else {
+                sub_area
             };
 
             let block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(if is_selected_slot { BorderType::Thick } else { BorderType::Rounded })
-                .border_style(if is_selected_slot && is_focused {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                } else if is_selected_slot {
-                    Style::default().fg(Color::Cyan)
+                .border_type(if slot.is_selected || is_focused_slot { BorderType::Thick } else { BorderType::Rounded })
+                .border_style(if is_focused_slot && is_focused {
+                    Style::default().fg(border_color).add_modifier(Modifier::BOLD)
                 } else {
-                    Style::default().fg(Color::DarkGray)
+                    Style::default().fg(border_color)
                 })
                 .title(format!(
-                    " {}{}{} ({}%){}{} ",
-                    if is_selected_slot { "► " } else { "" },
+                    " {}{}{}{} ({}%){}{} ",
+                    if is_focused_slot { "► " } else { "" },
+                    sel_badge,
                     slot.index + 1,
                     if !slot.label.is_empty() { format!(". {}", slot.label) } else { String::new() },
                     (slot.intensity * 100.0) as u32,
@@ -520,8 +587,8 @@ fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_f
                     flag_badge
                 ));
 
-            let inner = block.inner(sub_area);
-            frame.render_widget(block, sub_area);
+            let inner = block.inner(box_area);
+            frame.render_widget(block, box_area);
 
             let status_repr = match &slot.status {
                 VariantRenderStatus::Ready => "✔ Listo".to_string(),

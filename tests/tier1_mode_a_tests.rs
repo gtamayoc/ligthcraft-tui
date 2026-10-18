@@ -304,3 +304,206 @@ fn test_t1_sgl05_01_favorite_flagging_and_ratings() {
     state.set_flag(FlagStatus::Unflagged);
     assert_eq!(state.variants[1].flag, FlagStatus::Unflagged);
 }
+
+// ============================================================================
+// Feature: Variant Multi-Selection & State Cycle (US-002 & US-003)
+// ============================================================================
+
+#[test]
+fn test_variant_multiselection_and_batch_helpers() {
+    let mut state = ModeAState::default();
+    state.view_mode = ModeAView::VariantMatrix;
+    state.variant_count = 4;
+
+    // Initially none selected
+    assert_eq!(state.get_selected_or_focused_indices(), vec![0]);
+
+    // Select variant 0
+    state.focused_variant = 0;
+    state.toggle_selection();
+    assert!(state.variants[0].is_selected);
+    assert_eq!(state.get_selected_or_focused_indices(), vec![0]);
+
+    // Focus and select variant 2
+    state.focused_variant = 2;
+    state.toggle_selection();
+    assert!(state.variants[2].is_selected);
+
+    // Multi-selected variants list contains both 0 and 2
+    let selected = state.get_selected_or_focused_indices();
+    assert_eq!(selected, vec![0, 2]);
+
+    // Clear selection
+    state.clear_selection();
+    assert!(!state.variants[0].is_selected);
+    assert!(!state.variants[2].is_selected);
+    assert_eq!(state.get_selected_or_focused_indices(), vec![2]); // fallbacks to focused
+}
+
+// ============================================================================
+// Feature: Panel Key Navigation Isolation (US-001) & Export Prompt (US-004)
+// ============================================================================
+
+#[tokio::test]
+async fn test_panel1_left_right_keys_isolated_from_panel2_variants() {
+    use std::sync::Arc;
+    use std::path::PathBuf;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use lightcraft_tui::app::AppController;
+    use lightcraft_tui::graphics::protocol::ProtocolOverride;
+    use lightcraft_tui::mcp::client::{McpClient, McpClientConfig};
+    use lightcraft_tui::storage::presets_store::PresetStore;
+    use lightcraft_tui::tui::layout::PaneId;
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
+        .await
+        .unwrap();
+
+    app.mode_a.view_mode = ModeAView::VariantMatrix;
+    app.mode_a.variant_count = 4;
+    app.mode_a.focused_variant = 0;
+
+    // Focus is on Library (Panel 1)
+    app.focused_pane = PaneId::Library;
+
+    let right_key = KeyEvent {
+        code: KeyCode::Right,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+    let l_key = KeyEvent {
+        code: KeyCode::Char('l'),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+
+    // Pressing Right / 'l' while in Panel 1 MUST NOT change variant focus in Panel 2
+    app.handle_key(right_key).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 0, "Right arrow must be disabled in Panel 1");
+
+    app.handle_key(l_key).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 0, "'l' key must be disabled in Panel 1");
+
+    // Switch focus to PreviewCanvas (Panel 2)
+    app.focused_pane = PaneId::PreviewCanvas;
+
+    // Now Right key should advance variant focus
+    app.handle_key(right_key).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 1, "Right arrow must work in Panel 2");
+}
+
+#[tokio::test]
+async fn test_variant_export_prompt_and_cancellation() {
+    use std::sync::Arc;
+    use std::path::PathBuf;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use lightcraft_tui::app::AppController;
+    use lightcraft_tui::graphics::protocol::ProtocolOverride;
+    use lightcraft_tui::mcp::client::{McpClient, McpClientConfig};
+    use lightcraft_tui::storage::presets_store::PresetStore;
+    use lightcraft_tui::tui::layout::PaneId;
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
+        .await
+        .unwrap();
+
+    app.focused_pane = PaneId::PreviewCanvas;
+    app.mode_a.view_mode = ModeAView::VariantMatrix;
+    app.mode_a.variant_count = 4;
+
+    // Space selects variant 0
+    let space_key = KeyEvent {
+        code: KeyCode::Char(' '),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+    app.handle_key(space_key).await.unwrap();
+    assert!(app.mode_a.variants[0].is_selected);
+
+    // Press 'E' to trigger export prompt
+    let e_key = KeyEvent {
+        code: KeyCode::Char('e'),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+    app.handle_key(e_key).await.unwrap();
+    assert!(app.export_prompt, "Export prompt should be active");
+    assert!(app.status_message.contains("Exportación: 1 variante(s) seleccionada(s)"));
+
+    // Press Esc to cancel prompt
+    let esc_key = KeyEvent {
+        code: KeyCode::Esc,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+    app.handle_key(esc_key).await.unwrap();
+    assert!(!app.export_prompt, "Export prompt should be cancelled");
+    assert_eq!(app.status_message, "Exportación cancelada.");
+}
+
+#[tokio::test]
+async fn test_variant_batch_export_execution() {
+    use std::sync::Arc;
+    use std::path::PathBuf;
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use lightcraft_tui::app::AppController;
+    use lightcraft_tui::graphics::protocol::ProtocolOverride;
+    use lightcraft_tui::mcp::client::{McpClient, McpClientConfig};
+    use lightcraft_tui::storage::presets_store::PresetStore;
+    use lightcraft_tui::tui::layout::PaneId;
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
+        .await
+        .unwrap();
+
+    app.focused_pane = PaneId::PreviewCanvas;
+    app.mode_a.view_mode = ModeAView::VariantMatrix;
+    app.mode_a.variant_count = 4;
+
+    // Select variants 0 and 1
+    app.mode_a.focused_variant = 0;
+    app.mode_a.toggle_selection();
+    app.mode_a.focused_variant = 1;
+    app.mode_a.toggle_selection();
+    assert_eq!(app.mode_a.get_selected_or_focused_indices(), vec![0, 1]);
+
+    // Press 'E' to trigger export prompt
+    let e_key = KeyEvent {
+        code: KeyCode::Char('e'),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+    app.handle_key(e_key).await.unwrap();
+    assert!(app.export_prompt);
+
+    // Press '1' to choose TIFF export
+    let key_1 = KeyEvent {
+        code: KeyCode::Char('1'),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+    app.handle_key(key_1).await.unwrap();
+    assert!(!app.export_prompt);
+
+    if !app.items.is_empty() {
+        assert!(app.status_message.contains("Guardado OK") && app.status_message.contains("TIFF 16-bit"));
+    }
+
+    // Selections should be cleared after export
+    assert!(!app.mode_a.variants[0].is_selected);
+    assert!(!app.mode_a.variants[1].is_selected);
+}
+

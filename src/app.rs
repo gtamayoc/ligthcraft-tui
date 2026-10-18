@@ -64,6 +64,7 @@ pub struct AppController {
     pub needs_render: bool,
     pub running: bool,
     pub force_clear: bool,
+    pub export_prompt: bool,
     pub event_sender: Option<tokio::sync::mpsc::Sender<AppEvent>>,
 }
 
@@ -152,6 +153,7 @@ impl AppController {
             needs_render: true,
             running: true,
             force_clear: false,
+            export_prompt: false,
             event_sender: None,
         })
     }
@@ -338,6 +340,30 @@ impl AppController {
             return Ok(());
         }
 
+        // Export format selection prompt active in status bar
+        if self.export_prompt {
+            match key.code {
+                KeyCode::Esc => {
+                    self.export_prompt = false;
+                    self.status_message = "Exportación cancelada.".into();
+                }
+                KeyCode::Char('1') => {
+                    self.export_prompt = false;
+                    self.execute_variant_export_batch(1).await?;
+                }
+                KeyCode::Char('2') => {
+                    self.export_prompt = false;
+                    self.execute_variant_export_batch(2).await?;
+                }
+                KeyCode::Char('3') | KeyCode::Enter => {
+                    self.export_prompt = false;
+                    self.execute_variant_export_batch(3).await?;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         // Global hotkeys
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -447,12 +473,12 @@ impl AppController {
             }
 
             // Variant grid navigation (Horizontal & Vertical)
-            KeyCode::Left | KeyCode::Char('h') if self.mode_a.view_mode == ModeAView::VariantMatrix => {
+            KeyCode::Left | KeyCode::Char('h') if self.mode_a.view_mode == ModeAView::VariantMatrix && self.focused_pane == PaneId::PreviewCanvas => {
                 if self.mode_a.focused_variant > 0 {
                     self.mode_a.focused_variant -= 1;
                 }
             }
-            KeyCode::Right | KeyCode::Char('l') if self.mode_a.view_mode == ModeAView::VariantMatrix => {
+            KeyCode::Right | KeyCode::Char('l') if self.mode_a.view_mode == ModeAView::VariantMatrix && self.focused_pane == PaneId::PreviewCanvas => {
                 if self.mode_a.focused_variant + 1 < self.mode_a.variant_count {
                     self.mode_a.focused_variant += 1;
                 }
@@ -479,15 +505,29 @@ impl AppController {
                     self.mode_a.focused_variant += cols;
                 }
             }
-            KeyCode::Enter if self.mode_a.view_mode == ModeAView::VariantMatrix => {
+            KeyCode::Enter if self.mode_a.view_mode == ModeAView::VariantMatrix && self.focused_pane == PaneId::PreviewCanvas => {
                 self.mode_a.promote_focused_variant();
                 self.status_message = format!("Promoted variant to active recipe: {}", self.mode_a.active_recipe.name);
             }
 
-            // Favorite tagging & rating (F-SGL-05)
+            // Multi-selection (Space) & Favorite tagging (F) in PreviewCanvas
             KeyCode::Char(' ') if self.focused_pane == PaneId::PreviewCanvas => {
+                if self.mode_a.view_mode == ModeAView::VariantMatrix {
+                    self.mode_a.toggle_selection();
+                    let is_sel = self.mode_a.variants.get(self.mode_a.focused_variant).map(|s| s.is_selected).unwrap_or(false);
+                    self.status_message = format!(
+                        "Variante {} {}",
+                        self.mode_a.focused_variant + 1,
+                        if is_sel { "marcada para lote [X]" } else { "desmarcada" }
+                    );
+                } else {
+                    self.mode_a.toggle_favorite();
+                    self.status_message = "Toggled favorite on active variant".into();
+                }
+            }
+            KeyCode::Char('f') | KeyCode::Char('F') if self.focused_pane == PaneId::PreviewCanvas => {
                 self.mode_a.toggle_favorite();
-                self.status_message = "Toggled favorite on active variant".into();
+                self.status_message = "Toggled favorite (★) on active variant".into();
             }
             KeyCode::Char('p') | KeyCode::Char('P') => {
                 self.mode_a.set_flag(FlagStatus::Pick);
@@ -514,7 +554,14 @@ impl AppController {
                 self.status_message = "Cleared flag (UNFLAGGED)".into();
             }
             KeyCode::Char('e') | KeyCode::Char('E') => {
-                if let Some(item) = self.items.get(self.selected_index) {
+                if self.focused_pane == PaneId::PreviewCanvas && self.mode_a.view_mode == ModeAView::VariantMatrix {
+                    let targets = self.mode_a.get_selected_or_focused_indices();
+                    self.export_prompt = true;
+                    self.status_message = format!(
+                        "Exportación: {} variante(s) seleccionada(s): [1] Solo TIFF | [2] Solo JPEG | [3] Ambos (TIFF + JPEG) | [Esc] Cancelar",
+                        targets.len()
+                    );
+                } else if let Some(item) = self.items.get(self.selected_index) {
                     let source_path = item.path.clone();
                     let file_name = item.filename.clone();
                     let (recipe, target_label) = if self.mode_a.view_mode == ModeAView::VariantMatrix {
@@ -658,6 +705,7 @@ impl AppController {
 
     async fn sync_selected_photo(&mut self) -> Result<(), AppError> {
         if let Some(item) = self.items.get(self.selected_index) {
+            self.mode_a.clear_selection();
             self.mode_a.metadata = read_native_metadata(&item.path);
             if let Some(ref mut photo) = self.mode_a.active_photo {
                 photo.file_name = item.filename.clone();
@@ -670,6 +718,108 @@ impl AppController {
             self.status_message = format!("Selected: {}", item.filename);
             self.trigger_variant_previews();
         }
+        Ok(())
+    }
+
+    /// Execute batch export for all multi-selected (or currently focused) variants in Mode A.
+    pub async fn execute_variant_export_batch(&mut self, format_opt: u8) -> Result<(), AppError> {
+        let Some(item) = self.items.get(self.selected_index) else {
+            self.status_message = "No hay foto seleccionada para exportar".into();
+            return Ok(());
+        };
+
+        let source_path = item.path.clone();
+        let file_name = item.filename.clone();
+        let target_indices = self.mode_a.get_selected_or_focused_indices();
+        let output_dir = PathBuf::from("export").join("interactive");
+        let pipeline = crate::export::ExportPipeline::new();
+
+        let format_label = match format_opt {
+            1 => "TIFF 16-bit",
+            2 => "JPEG 100%",
+            _ => "TIFF 16-bit + JPEG 100%",
+        };
+
+        self.status_message = format!(
+            "Exportando {} variante(s) de {} en formato {}...",
+            target_indices.len(),
+            file_name,
+            format_label
+        );
+        self.needs_render = true;
+
+        let mut success_count = 0usize;
+        let mut job_seq = 1usize;
+
+        for &slot_idx in &target_indices {
+            let (recipe, preset_name) = if let Some(slot) = self.mode_a.variants.get(slot_idx) {
+                (slot.recipe.clone(), slot.recipe.name.clone())
+            } else {
+                (self.mode_a.active_recipe.clone(), self.mode_a.active_recipe.name.clone())
+            };
+
+            let variant_tag = format!("var{}_{}", slot_idx + 1, preset_name.replace(' ', "_"));
+
+            // TIFF export job
+            if format_opt == 1 || format_opt == 3 {
+                let tiff_job = crate::export::ExportJob {
+                    job_id: job_seq as u64,
+                    source_path: source_path.clone(),
+                    photo_id: None,
+                    recipe_name: variant_tag.clone(),
+                    recipe: recipe.clone(),
+                    profile: crate::export::ExportProfile {
+                        name: format!("{}_TIFF16", variant_tag),
+                        format: crate::export::OutputFormat::Tiff,
+                        quality: 100,
+                        bit_depth: crate::export::BitDepth::Sixteen,
+                        scaling: crate::export::ScalingProfile::Native,
+                        ..Default::default()
+                    },
+                    output_dir: output_dir.clone(),
+                    template: crate::export::NamingTemplate::parse("{name}__{preset}.{ext}"),
+                    seq_number: job_seq,
+                    collision_policy: crate::export::CollisionPolicy::Overwrite,
+                };
+                job_seq += 1;
+                let _ = pipeline.execute_export(None, &tiff_job).await;
+            }
+
+            // JPEG export job
+            if format_opt == 2 || format_opt == 3 {
+                let jpeg_job = crate::export::ExportJob {
+                    job_id: job_seq as u64,
+                    source_path: source_path.clone(),
+                    photo_id: None,
+                    recipe_name: variant_tag.clone(),
+                    recipe: recipe.clone(),
+                    profile: crate::export::ExportProfile {
+                        name: format!("{}_JPEG100", variant_tag),
+                        format: crate::export::OutputFormat::Jpeg,
+                        quality: 100,
+                        bit_depth: crate::export::BitDepth::Eight,
+                        scaling: crate::export::ScalingProfile::Native,
+                        ..Default::default()
+                    },
+                    output_dir: output_dir.clone(),
+                    template: crate::export::NamingTemplate::parse("{name}__{preset}.{ext}"),
+                    seq_number: job_seq,
+                    collision_policy: crate::export::CollisionPolicy::Overwrite,
+                };
+                job_seq += 1;
+                let _ = pipeline.execute_export(None, &jpeg_job).await;
+            }
+
+            success_count += 1;
+        }
+
+        self.mode_a.clear_selection();
+        self.status_message = format!(
+            "Exportación completada. Guardado OK: {} variante(s) exportadas en {}",
+            success_count,
+            format_label
+        );
+        self.needs_render = true;
         Ok(())
     }
 
@@ -794,6 +944,26 @@ impl AppController {
     }
 
     fn render_status(&self, frame: &mut Frame, area: Rect) {
+        if self.export_prompt {
+            let targets = self.mode_a.get_selected_or_focused_indices();
+            let prompt_text = format!(
+                " EXPORTACIÓN: {} variante(s) seleccionada(s) | [1] Solo TIFF | [2] Solo JPEG | [3 / Enter] Ambos (TIFF + JPEG) | [Esc] Cancelar ",
+                targets.len()
+            );
+            let p = Paragraph::new(Line::from(vec![
+                Span::styled(
+                    " [EXPORTAR FORMATO] ",
+                    Style::default().fg(Color::Black).bg(Color::Rgb(255, 165, 0)).add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    prompt_text,
+                    Style::default().fg(Color::White).bg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            frame.render_widget(p, area);
+            return;
+        }
+
         let active_pane_str = match self.focused_pane {
             PaneId::Library => "Panel Activo: [1. BIBLIOTECA]",
             PaneId::PreviewCanvas => "Panel Activo: [2. PREVISUALIZADOR]",
@@ -808,14 +978,16 @@ impl AppController {
         let variant_badge = if self.mode_a.view_mode == ModeAView::VariantMatrix {
             let ready_count = self.mode_a.variants.iter().take(self.mode_a.variant_count).filter(|v| matches!(v.status, crate::tui::mode_a::VariantRenderStatus::Ready)).count();
             let total = self.mode_a.variant_count;
-            format!(" [Var: {}/{}]", ready_count, total)
+            let sel_count = self.mode_a.variants.iter().take(total).filter(|v| v.is_selected).count();
+            let sel_str = if sel_count > 0 { format!(" [Sel: {}]", sel_count) } else { String::new() };
+            format!(" [Var: {}/{}{}]", ready_count, total, sel_str)
         } else {
             String::new()
         };
 
         let help_text = match (self.focused_pane, self.mode_a.view_mode) {
             (PaneId::Library, _) => " | [↑/↓]: Fotos | [Space]: Seleccionar | [Tab]: Ir a Canvas | [F5]: Refrescar | [E]: Exportar Max Calidad | [Q]: Salir ",
-            (PaneId::PreviewCanvas, ModeAView::VariantMatrix) => " | [←/→/↑/↓]: Variantes | [Enter]: Promover | [F5]: Refrescar | [E]: Exportar Variante Max | [1]: Hero | [Q]: Salir ",
+            (PaneId::PreviewCanvas, ModeAView::VariantMatrix) => " | [←/→/↑/↓]: Variantes | [Space]: Sel [X] | [F]: Fav ★ | [Enter]: Promover | [E]: Exportar Lote | [1]: Hero | [Q]: Salir ",
             (PaneId::PreviewCanvas, _) => " | [1]: Hero | [2/4/6]: Matriz Variantes | [S]: Split A/B | [F5]: Refrescar | [E]: Exportar Max Calidad | [Q]: Salir ",
             _ => " | [Tab]: Foco 1↔2 | [F5]: Refrescar Pantalla | [E]: Exportar Max Calidad | [Q]: Salir ",
         };
