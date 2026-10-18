@@ -167,10 +167,17 @@ impl AppController {
         self.trigger_variant_previews();
 
         while self.running {
-            if self.needs_render {
-                if let Ok(size) = terminal.size() {
-                    self.terminal_size = Rect::new(0, 0, size.width, size.height);
+            // Continuously detect terminal window resize (e.g. OS maximize or manual resize)
+            if let Ok(size) = terminal.size() {
+                let current_rect = Rect::new(0, 0, size.width, size.height);
+                if current_rect != self.terminal_size {
+                    self.terminal_size = current_rect;
+                    self.force_clear = true;
+                    self.needs_render = true;
                 }
+            }
+
+            if self.needs_render {
                 if self.force_clear {
                     let _ = terminal.clear();
                     self.force_clear = false;
@@ -265,13 +272,8 @@ impl AppController {
                 self.needs_render = true;
             }
             AppEvent::Resize(w, h) => {
-                let prev_small = self.terminal_size.width < AppLayout::MIN_WIDTH
-                    || self.terminal_size.height < AppLayout::MIN_HEIGHT;
-                let now_valid = w >= AppLayout::MIN_WIDTH && h >= AppLayout::MIN_HEIGHT;
                 self.terminal_size = Rect::new(0, 0, w, h);
-                if prev_small && now_valid {
-                    self.force_clear = true;
-                }
+                self.force_clear = true;
                 self.needs_render = true;
             }
             AppEvent::Tick => {
@@ -389,6 +391,20 @@ impl AppController {
                 self.status_message = "Vista y buffer del terminal restablecidos (F5)".into();
                 return Ok(());
             }
+            KeyCode::Char('l') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.force_clear = true;
+                self.needs_render = true;
+                self.status_message = "Vista y buffer del terminal restablecidos (Ctrl+L)".into();
+                return Ok(());
+            }
+            KeyCode::Char('r') | KeyCode::Char('R')
+                if self.mode == AppMode::SinglePhoto && !self.export_prompt =>
+            {
+                self.force_clear = true;
+                self.needs_render = true;
+                self.status_message = "Vista y buffer del terminal restablecidos (R)".into();
+                return Ok(());
+            }
             KeyCode::Tab => {
                 self.focused_pane = self.focused_pane.next();
                 return Ok(());
@@ -411,22 +427,66 @@ impl AppController {
 
     async fn handle_mode_a_key(&mut self, key: KeyEvent) -> Result<(), AppError> {
         match key.code {
-            // Photo library navigation
-            KeyCode::Up | KeyCode::Char('k') if self.focused_pane == PaneId::Library => {
-                if self.selected_index > 0 {
-                    self.selected_index -= 1;
+            // Photo library navigation (Up / Down / Left / Right / k / j / h / l) with wrap-around
+            KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h')
+                if self.focused_pane == PaneId::Library =>
+            {
+                if !self.items.is_empty() {
+                    if self.selected_index > 0 {
+                        self.selected_index -= 1;
+                    } else {
+                        self.selected_index = self.items.len() - 1;
+                    }
                     self.sync_selected_photo().await?;
                 }
             }
-            KeyCode::Down | KeyCode::Char('j') if self.focused_pane == PaneId::Library => {
-                if !self.items.is_empty() && self.selected_index < self.items.len() - 1 {
-                    self.selected_index += 1;
+            KeyCode::Down | KeyCode::Right | KeyCode::Char('j') | KeyCode::Char('l')
+                if self.focused_pane == PaneId::Library =>
+            {
+                if !self.items.is_empty() {
+                    if self.selected_index < self.items.len() - 1 {
+                        self.selected_index += 1;
+                    } else {
+                        self.selected_index = 0;
+                    }
                     self.sync_selected_photo().await?;
                 }
             }
             KeyCode::Char(' ') if self.focused_pane == PaneId::Library => {
                 if let Some(item) = self.items.get_mut(self.selected_index) {
                     item.is_selected = !item.is_selected;
+                    let is_sel = item.is_selected;
+                    self.status_message = format!(
+                        "Foto {} {}",
+                        item.filename,
+                        if is_sel { "marcada para lote [x]" } else { "desmarcada [ ]" }
+                    );
+                }
+            }
+
+            // Photo navigation from PreviewCanvas (Hero and SplitView)
+            KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h')
+                if self.focused_pane == PaneId::PreviewCanvas && self.mode_a.view_mode != ModeAView::VariantMatrix =>
+            {
+                if !self.items.is_empty() {
+                    if self.selected_index > 0 {
+                        self.selected_index -= 1;
+                    } else {
+                        self.selected_index = self.items.len() - 1;
+                    }
+                    self.sync_selected_photo().await?;
+                }
+            }
+            KeyCode::Down | KeyCode::Right | KeyCode::Char('j') | KeyCode::Char('l')
+                if self.focused_pane == PaneId::PreviewCanvas && self.mode_a.view_mode != ModeAView::VariantMatrix =>
+            {
+                if !self.items.is_empty() {
+                    if self.selected_index < self.items.len() - 1 {
+                        self.selected_index += 1;
+                    } else {
+                        self.selected_index = 0;
+                    }
+                    self.sync_selected_photo().await?;
                 }
             }
 
@@ -476,11 +536,15 @@ impl AppController {
             KeyCode::Left | KeyCode::Char('h') if self.mode_a.view_mode == ModeAView::VariantMatrix && self.focused_pane == PaneId::PreviewCanvas => {
                 if self.mode_a.focused_variant > 0 {
                     self.mode_a.focused_variant -= 1;
+                } else if self.mode_a.variant_count > 0 {
+                    self.mode_a.focused_variant = self.mode_a.variant_count - 1;
                 }
             }
             KeyCode::Right | KeyCode::Char('l') if self.mode_a.view_mode == ModeAView::VariantMatrix && self.focused_pane == PaneId::PreviewCanvas => {
                 if self.mode_a.focused_variant + 1 < self.mode_a.variant_count {
                     self.mode_a.focused_variant += 1;
+                } else {
+                    self.mode_a.focused_variant = 0;
                 }
             }
             KeyCode::Up | KeyCode::Char('k') if self.mode_a.view_mode == ModeAView::VariantMatrix && self.focused_pane == PaneId::PreviewCanvas => {
@@ -986,10 +1050,10 @@ impl AppController {
         };
 
         let help_text = match (self.focused_pane, self.mode_a.view_mode) {
-            (PaneId::Library, _) => " | [↑/↓]: Fotos | [Space]: Seleccionar | [Tab]: Ir a Canvas | [F5]: Refrescar | [E]: Exportar Max Calidad | [Q]: Salir ",
-            (PaneId::PreviewCanvas, ModeAView::VariantMatrix) => " | [←/→/↑/↓]: Variantes | [Space]: Sel [X] | [F]: Fav ★ | [Enter]: Promover | [E]: Exportar Lote | [1]: Hero | [Q]: Salir ",
-            (PaneId::PreviewCanvas, _) => " | [1]: Hero | [2/4/6]: Matriz Variantes | [S]: Split A/B | [F5]: Refrescar | [E]: Exportar Max Calidad | [Q]: Salir ",
-            _ => " | [Tab]: Foco 1↔2 | [F5]: Refrescar Pantalla | [E]: Exportar Max Calidad | [Q]: Salir ",
+            (PaneId::Library, _) => " | [↑/↓/←/→]: Fotos | [Space]: Sel [X] | [Tab]: Ir a Canvas | [F5/R]: Refrescar | [E]: Exportar Max Calidad | [Q]: Salir ",
+            (PaneId::PreviewCanvas, ModeAView::VariantMatrix) => " | [←/→/↑/↓]: Variantes | [Space]: Sel [X] | [F]: Fav ★ | [Enter]: Promover | [E]: Exportar Lote | [1]: Hero | [F5/R]: Refrescar | [Q]: Salir ",
+            (PaneId::PreviewCanvas, _) => " | [↑/↓/←/→]: Fotos | [1]: Hero | [2/4/6]: Matriz Variantes | [S]: Split A/B | [F5/R]: Refrescar | [E]: Exportar Max Calidad | [Q]: Salir ",
+            _ => " | [Tab]: Foco 1↔2 | [F5/R]: Refrescar Pantalla | [E]: Exportar Max Calidad | [Q]: Salir ",
         };
 
         let help_guide = Span::styled(

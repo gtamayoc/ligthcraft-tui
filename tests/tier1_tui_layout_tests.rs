@@ -424,4 +424,134 @@ async fn test_key_e_immediate_sequential_dual_export() {
     }
 }
 
+#[tokio::test]
+async fn test_resize_event_unconditionally_triggers_force_clear_and_needs_render() {
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
+        .await
+        .unwrap();
+
+    app.terminal_size = Rect::new(0, 0, 120, 30);
+    app.force_clear = false;
+    app.needs_render = false;
+
+    // Simulate resizing between two normal/valid sizes (e.g. 120x30 -> 200x50, window maximized)
+    app.handle_event(lightcraft_tui::tui::event::AppEvent::Resize(200, 50))
+        .await
+        .unwrap();
+
+    assert!(app.force_clear, "Resizing between valid sizes MUST unconditionally set force_clear");
+    assert!(app.needs_render, "Resizing must set needs_render");
+    assert_eq!(app.terminal_size, Rect::new(0, 0, 200, 50));
+}
+
+#[tokio::test]
+async fn test_screen_refresh_shortcuts_f5_r_ctrl_l() {
+    use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState, KeyCode, KeyModifiers};
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
+        .await
+        .unwrap();
+
+    // 1. Test F5
+    app.force_clear = false;
+    app.handle_key(KeyEvent {
+        code: KeyCode::F(5),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    }).await.unwrap();
+    assert!(app.force_clear, "F5 must set force_clear to true");
+    assert!(app.status_message.contains("F5"));
+
+    // 2. Test 'r' / 'R'
+    app.force_clear = false;
+    app.handle_key(KeyEvent {
+        code: KeyCode::Char('r'),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    }).await.unwrap();
+    assert!(app.force_clear, "Key 'r' must set force_clear to true");
+    assert!(app.status_message.to_lowercase().contains("restablecid"));
+
+    // 3. Test Ctrl+L
+    app.force_clear = false;
+    app.handle_key(KeyEvent {
+        code: KeyCode::Char('l'),
+        modifiers: KeyModifiers::CONTROL,
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    }).await.unwrap();
+    assert!(app.force_clear, "Ctrl+L must set force_clear to true");
+}
+
+#[tokio::test]
+async fn test_arrow_keys_navigation_and_wrapping_in_library_and_canvas() {
+    use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState, KeyCode, KeyModifiers};
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
+        .await
+        .unwrap();
+
+    if app.items.len() >= 2 {
+        app.selected_index = 0;
+        app.focused_pane = PaneId::Library;
+
+        // Up on index 0 should wrap to last item
+        app.handle_key(KeyEvent {
+            code: KeyCode::Up,
+            modifiers: KeyModifiers::empty(),
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        }).await.unwrap();
+        assert_eq!(app.selected_index, app.items.len() - 1, "Up arrow at index 0 should wrap to last item");
+
+        // Down on last item should wrap to first item
+        app.handle_key(KeyEvent {
+            code: KeyCode::Down,
+            modifiers: KeyModifiers::empty(),
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        }).await.unwrap();
+        assert_eq!(app.selected_index, 0, "Down arrow at end should wrap to first item");
+
+        // Left arrow should navigate to previous item (wrapping to end)
+        app.handle_key(KeyEvent {
+            code: KeyCode::Left,
+            modifiers: KeyModifiers::empty(),
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        }).await.unwrap();
+        assert_eq!(app.selected_index, app.items.len() - 1, "Left arrow should navigate backward");
+
+        // Right arrow should navigate forward (wrapping to 0)
+        app.handle_key(KeyEvent {
+            code: KeyCode::Right,
+            modifiers: KeyModifiers::empty(),
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        }).await.unwrap();
+        assert_eq!(app.selected_index, 0, "Right arrow should navigate forward");
+
+        // Focus on PreviewCanvas in Hero view -> arrows should also navigate photos
+        app.focused_pane = PaneId::PreviewCanvas;
+        app.mode_a.view_mode = ModeAView::Hero;
+
+        app.handle_key(KeyEvent {
+            code: KeyCode::Right,
+            modifiers: KeyModifiers::empty(),
+            kind: KeyEventKind::Press,
+            state: KeyEventState::empty(),
+        }).await.unwrap();
+        assert_eq!(app.selected_index, 1, "Right arrow in PreviewCanvas should advance photo");
+    }
+}
+
+
 

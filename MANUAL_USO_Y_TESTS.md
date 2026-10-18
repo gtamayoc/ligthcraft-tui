@@ -201,25 +201,27 @@ Puedes cambiar el foco de dos maneras:
 | :--- | :--- |
 | `Tab` | Alternar foco: Biblioteca (1) ⟷ Lienzo Previsualizador (2) |
 | `Shift + Tab` | Retroceder foco de panel |
-| `F5` | Restablecer buffer del terminal, limpiar distorsiones y refrescar layout |
+| `F5` o `r` / `R` o `Ctrl + L` | **Restablecer buffer del terminal**, limpiar distorsiones y refrescar layout (ideal si en tu portátil `F5` requiere tecla `Fn`) |
 | `F10` o `m` / `M` | Alternar entre Modo A (Single) y Modo B (Batch) |
 | `q` o `Ctrl + C` | Salir de LightCraft TUI |
 
 ### En Panel 1: Biblioteca
 | Atajo | Función |
 | :--- | :--- |
-| `↑` o `k` | Foto anterior (con scroll automático de lista) |
-| `↓` o `j` | Siguiente foto (con scroll automático de lista) |
+| `↑` / `←` o `k` / `h` | Foto anterior (con rotación continua y scroll automático) |
+| `↓` / `→` o `j` / `l` | Siguiente foto (con rotación continua y scroll automático) |
 | `Espacio` | Marcar / desmarcar foto para procesamiento por lote (`[x]`) |
 
 ### En Panel 2: Previsualizador (Modo A)
 | Atajo | Función |
 | :--- | :--- |
+| `↑` / `←` o `k` / `h` | En modo Hero/Split: Foto anterior en la biblioteca |
+| `↓` / `→` o `j` / `l` | En modo Hero/Split: Siguiente foto en la biblioteca |
 | `1` | Vista Hero (previsualización principal completa) |
 | `2` | Matriz de 2 variantes |
 | `4` o `v` / `V` | Matriz 2x2 (4 variantes simultáneas) |
 | `6` | Matriz 3x2 (6 variantes simultáneas) |
-| `←`, `→`, `↑`, `↓` o `h`, `l`, `k`, `j` | Navegación entre las celdas de la matriz de variantes |
+| `←`, `→`, `↑`, `↓` o `h`, `l`, `k`, `j` | En Matriz de Variantes: Navegación entre las celdas con rotación continua |
 | `Enter` | Promover variante seleccionada como receta maestra activa |
 | `s` / `S` | Vista dividida Antes/Después (Split View lado a lado) |
 | `\` | Alternar instantáneamente A/B (Original vs Con Receta) |
