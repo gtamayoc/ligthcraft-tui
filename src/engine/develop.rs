@@ -45,12 +45,18 @@ impl DevelopBridge {
         }
 
         // 3. Light & Exposure
-        out.light.exposure = ((base.light.exposure as f64 + recipe.exposure as f64 * i).clamp(-5.0, 5.0)) as f32;
-        out.light.contrast = ((base.light.contrast as f64 + recipe.contrast as f64 * i).clamp(-100.0, 100.0)) as f32;
-        out.light.highlights = ((base.light.highlights as f64 + recipe.highlights as f64 * i).clamp(-100.0, 100.0)) as f32;
-        out.light.shadows = ((base.light.shadows as f64 + recipe.shadows as f64 * i).clamp(-100.0, 100.0)) as f32;
-        out.light.whites = ((base.light.whites as f64 + recipe.whites as f64 * i).clamp(-100.0, 100.0)) as f32;
-        out.light.blacks = ((base.light.blacks as f64 + recipe.blacks as f64 * i).clamp(-100.0, 100.0)) as f32;
+        out.light.exposure =
+            ((base.light.exposure as f64 + recipe.exposure as f64 * i).clamp(-5.0, 5.0)) as f32;
+        out.light.contrast =
+            ((base.light.contrast as f64 + recipe.contrast as f64 * i).clamp(-100.0, 100.0)) as f32;
+        out.light.highlights = ((base.light.highlights as f64 + recipe.highlights as f64 * i)
+            .clamp(-100.0, 100.0)) as f32;
+        out.light.shadows =
+            ((base.light.shadows as f64 + recipe.shadows as f64 * i).clamp(-100.0, 100.0)) as f32;
+        out.light.whites =
+            ((base.light.whites as f64 + recipe.whites as f64 * i).clamp(-100.0, 100.0)) as f32;
+        out.light.blacks =
+            ((base.light.blacks as f64 + recipe.blacks as f64 * i).clamp(-100.0, 100.0)) as f32;
 
         // 4. White Balance
         if let Some(recipe_temp) = recipe.temperature {
@@ -60,20 +66,30 @@ impl DevelopBridge {
         out.wb.tint = ((base.wb.tint as f64 + recipe.tint as f64 * i).clamp(-150.0, 150.0)) as f32;
 
         // 5. Color
-        out.color.vibrance = ((base.color.vibrance as f64 + recipe.vibrance as f64 * i).clamp(-100.0, 100.0)) as f32;
-        out.color.saturation = ((base.color.saturation as f64 + recipe.saturation as f64 * i).clamp(-100.0, 100.0)) as f32;
+        out.color.vibrance =
+            ((base.color.vibrance as f64 + recipe.vibrance as f64 * i).clamp(-100.0, 100.0)) as f32;
+        out.color.saturation = ((base.color.saturation as f64 + recipe.saturation as f64 * i)
+            .clamp(-100.0, 100.0)) as f32;
 
         // 6. Effects
-        out.effects.clarity = ((base.effects.clarity as f64 + recipe.clarity as f64 * i).clamp(-100.0, 100.0)) as f32;
-        out.effects.dehaze = ((base.effects.dehaze as f64 + recipe.dehaze as f64 * i).clamp(-100.0, 100.0)) as f32;
+        out.effects.clarity =
+            ((base.effects.clarity as f64 + recipe.clarity as f64 * i).clamp(-100.0, 100.0)) as f32;
+        out.effects.dehaze =
+            ((base.effects.dehaze as f64 + recipe.dehaze as f64 * i).clamp(-100.0, 100.0)) as f32;
 
         // 7. Detail
-        out.detail.sharpen_amount = ((base.detail.sharpen_amount as f64 + recipe.sharpen_amount as f64 * i).clamp(0.0, 150.0)) as f32;
-        out.detail.nr_luminance = ((base.detail.nr_luminance as f64 + recipe.nr_luminance as f64 * i).clamp(0.0, 100.0)) as f32;
-        out.detail.nr_color = ((base.detail.nr_color as f64 + recipe.nr_color as f64 * i).clamp(0.0, 100.0)) as f32;
+        out.detail.sharpen_amount = ((base.detail.sharpen_amount as f64
+            + recipe.sharpen_amount as f64 * i)
+            .clamp(0.0, 150.0)) as f32;
+        out.detail.nr_luminance = ((base.detail.nr_luminance as f64
+            + recipe.nr_luminance as f64 * i)
+            .clamp(0.0, 100.0)) as f32;
+        out.detail.nr_color =
+            ((base.detail.nr_color as f64 + recipe.nr_color as f64 * i).clamp(0.0, 100.0)) as f32;
 
         // 8. Vignette
-        out.vignette.amount = ((base.vignette.amount as f64 + recipe.vignette as f64 * i).clamp(-100.0, 100.0)) as f32;
+        out.vignette.amount = ((base.vignette.amount as f64 + recipe.vignette as f64 * i)
+            .clamp(-100.0, 100.0)) as f32;
 
         // 9. Structured Blocks
         if let Some(ref m) = recipe.mixer {
@@ -105,7 +121,11 @@ impl DevelopBridge {
             .collect::<String>();
 
         Recipe {
-            id: if slug.is_empty() { "custom-recipe".into() } else { slug },
+            id: if slug.is_empty() {
+                "custom-recipe".into()
+            } else {
+                slug
+            },
             name: name_str,
             category: Default::default(),
             description: None,
@@ -199,7 +219,8 @@ impl NativePresetRegistry {
 
         for p in presets {
             self.presets_by_id.insert(p.id.clone(), p.clone());
-            self.presets_by_name.insert(p.name.to_lowercase(), p.clone());
+            self.presets_by_name
+                .insert(p.name.to_lowercase(), p.clone());
             self.groups
                 .entry(p.group.clone())
                 .or_default()
@@ -221,7 +242,11 @@ impl NativePresetRegistry {
     pub fn get_group(&self, group: &str) -> Vec<&McpPresetInfo> {
         self.groups
             .get(group)
-            .map(|ids| ids.iter().filter_map(|id| self.presets_by_id.get(id)).collect())
+            .map(|ids| {
+                ids.iter()
+                    .filter_map(|id| self.presets_by_id.get(id))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -250,15 +275,9 @@ impl NativePresetRegistry {
 #[derive(Debug, Clone)]
 pub enum PresetApplicationStrategy {
     /// Dispatches `apply_preset` directly to LightCraft daemon.
-    ServerNative {
-        preset_id: String,
-        amount_pct: f64,
-    },
+    ServerNative { preset_id: String, amount_pct: f64 },
     /// Renders client-side Recipe and transmits full DevelopSettings / flat values.
-    ClientRecipe {
-        recipe: Recipe,
-        intensity: f64,
-    },
+    ClientRecipe { recipe: Recipe, intensity: f64 },
     /// Two-phase hybrid: applies native preset as base, then layers custom adjustments.
     HybridMerge {
         native_preset_id: String,
@@ -307,7 +326,10 @@ mod tests {
 
         assert_eq!(reg.len(), 2);
         assert!(reg.is_native("lc.teal-orange"));
-        assert_eq!(reg.find_by_name("teal & orange").unwrap().id, "lc.teal-orange");
+        assert_eq!(
+            reg.find_by_name("teal & orange").unwrap().id,
+            "lc.teal-orange"
+        );
         assert_eq!(reg.get_group("Color").len(), 1);
     }
 }

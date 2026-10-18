@@ -1,17 +1,19 @@
 //! Export subsystem facade, execution pipeline, and multi-format renderer (F-EXP-01..04).
 
+pub mod aspect;
 pub mod collision;
 pub mod naming;
 pub mod profile;
 
+pub use aspect::*;
 pub use collision::*;
 pub use naming::*;
 pub use profile::*;
 
+use image::{ExtendedColorType, ImageEncoder};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, RwLock};
 use std::time::{Duration, Instant};
-use image::{ExtendedColorType, ImageEncoder};
 use thiserror::Error;
 
 use crate::error::{IntegrityViolationError, McpError};
@@ -78,7 +80,10 @@ pub enum ExportError {
 }
 
 /// Validates export target path for traversal attacks, reserved device names, and source sandboxing.
-pub fn validate_export_path(target_path: &Path, source_dirs: &[PathBuf]) -> Result<PathBuf, ExportError> {
+pub fn validate_export_path(
+    target_path: &Path,
+    source_dirs: &[PathBuf],
+) -> Result<PathBuf, ExportError> {
     // 1. Lexical traversal checks
     for comp in target_path.components() {
         match comp {
@@ -94,16 +99,18 @@ pub fn validate_export_path(target_path: &Path, source_dirs: &[PathBuf]) -> Resu
                 }
                 let lower = name.to_ascii_lowercase();
                 if lower.contains("%2e%2e") || lower.contains("%2f") || lower.contains("%5c") {
-                    return Err(ExportError::PathTraversal("Encoded traversal sequence detected".into()));
+                    return Err(ExportError::PathTraversal(
+                        "Encoded traversal sequence detected".into(),
+                    ));
                 }
                 let stem = Path::new(&*name)
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or(&name);
                 const RESERVED: &[&str] = &[
-                    "CON", "PRN", "AUX", "NUL",
-                    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-                    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+                    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6",
+                    "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7",
+                    "LPT8", "LPT9",
                 ];
                 if RESERVED.iter().any(|&r| r.eq_ignore_ascii_case(stem)) {
                     return Err(ExportError::ReservedDeviceName(stem.to_string()));
@@ -335,7 +342,10 @@ impl ExportPipeline {
     }
 
     /// Loads a source photographic asset from disk, either decoding embedded CR3 preview or standard raster formats.
-    pub fn load_source_image(source_path: &Path, max_dim: Option<u32>) -> Result<image::DynamicImage, ExportError> {
+    pub fn load_source_image(
+        source_path: &Path,
+        max_dim: Option<u32>,
+    ) -> Result<image::DynamicImage, ExportError> {
         let is_cr3 = source_path
             .extension()
             .and_then(|e| e.to_str())
@@ -381,7 +391,8 @@ impl ExportPipeline {
             } else {
                 Err(ExportError::SourceCorrupted {
                     path: source_path.to_path_buf(),
-                    reason: "No readable embedded preview raster stream found in CR3 RAW file".into(),
+                    reason: "No readable embedded preview raster stream found in CR3 RAW file"
+                        .into(),
                 })
             }
         } else {
@@ -468,7 +479,11 @@ impl ExportPipeline {
         // 6. Source photographic asset decoding
         let max_dim = match job.profile.scaling {
             ScalingProfile::LongEdge { max_long_edge, .. } => Some(max_long_edge),
-            ScalingProfile::FitToBounds { max_width, max_height, .. } => Some(max_width.max(max_height)),
+            ScalingProfile::FitToBounds {
+                max_width,
+                max_height,
+                ..
+            } => Some(max_width.max(max_height)),
             _ => None,
         };
 
@@ -483,8 +498,13 @@ impl ExportPipeline {
             if let Ok(photo_res) = client.render_photo(params).await {
                 use base64::Engine;
                 if !photo_res.data_base64.is_empty() {
-                    if let Ok(decoded_bytes) = base64::engine::general_purpose::STANDARD.decode(&photo_res.data_base64) {
-                        image::load_from_memory(&decoded_bytes).unwrap_or_else(|_| Self::load_source_image(&job.source_path, max_dim).unwrap_or_else(|_| image::DynamicImage::new_rgb8(6000, 4000)))
+                    if let Ok(decoded_bytes) =
+                        base64::engine::general_purpose::STANDARD.decode(&photo_res.data_base64)
+                    {
+                        image::load_from_memory(&decoded_bytes).unwrap_or_else(|_| {
+                            Self::load_source_image(&job.source_path, max_dim)
+                                .unwrap_or_else(|_| image::DynamicImage::new_rgb8(6000, 4000))
+                        })
                     } else {
                         Self::load_source_image(&job.source_path, max_dim)?
                     }
@@ -503,7 +523,10 @@ impl ExportPipeline {
 
         let src_w = source_dyn.width();
         let src_h = source_dyn.height();
-        let (target_w, target_h) = job.profile.scaling.compute_target_dimensions(src_w, src_h)?;
+        let (target_w, target_h) = job
+            .profile
+            .scaling
+            .compute_target_dimensions(src_w, src_h)?;
 
         // Enforce scaling bounds: prevent uncatchable OOM allocator abort and ensure clean panic isolation
         assert!(
@@ -519,11 +542,21 @@ impl ExportPipeline {
         let target_path_clone = target_path.clone();
 
         let bytes_written_res = tokio::task::spawn_blocking(move || -> Result<u64, ExportError> {
+            // Apply geometric aspect crop if configured
+            let cropped_dyn = match profile.scaling {
+                ScalingProfile::AspectCrop { ratio } => {
+                    let (x, y, cw, ch) =
+                        crate::export::aspect::calculate_center_crop(src_w, src_h, ratio);
+                    source_dyn.crop_imm(x, y, cw, ch)
+                }
+                _ => source_dyn,
+            };
+
             // Resize image to computed target dimensions
-            let resized = if target_w == src_w && target_h == src_h {
-                source_dyn
+            let resized = if target_w == cropped_dyn.width() && target_h == cropped_dyn.height() {
+                cropped_dyn
             } else {
-                source_dyn.resize_exact(target_w, target_h, image::imageops::FilterType::Nearest)
+                cropped_dyn.resize_exact(target_w, target_h, image::imageops::FilterType::Nearest)
             };
 
             // Atomic write via temporary staging file in the target directory
@@ -541,13 +574,9 @@ impl ExportPipeline {
                     let mut img8 = resized.to_rgb8();
                     apply_recipe_to_rgb8(&mut img8, &recipe);
                     let quality = profile.quality.clamp(1, 100);
-                    let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut temp_file, quality);
-                    encoder.write_image(
-                        img8.as_raw(),
-                        target_w,
-                        target_h,
-                        ExtendedColorType::Rgb8,
-                    )
+                    let encoder =
+                        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut temp_file, quality);
+                    encoder.write_image(img8.as_raw(), target_w, target_h, ExtendedColorType::Rgb8)
                 }
                 (OutputFormat::Png, BitDepth::Sixteen) => {
                     let mut img16 = resized.to_rgb16();
@@ -558,23 +587,13 @@ impl ExportPipeline {
                         .flat_map(|val| val.to_be_bytes())
                         .collect();
                     let encoder = image::codecs::png::PngEncoder::new(&mut temp_file);
-                    encoder.write_image(
-                        &raw_bytes,
-                        target_w,
-                        target_h,
-                        ExtendedColorType::Rgb16,
-                    )
+                    encoder.write_image(&raw_bytes, target_w, target_h, ExtendedColorType::Rgb16)
                 }
                 (OutputFormat::Png, BitDepth::Eight) => {
                     let mut img8 = resized.to_rgb8();
                     apply_recipe_to_rgb8(&mut img8, &recipe);
                     let encoder = image::codecs::png::PngEncoder::new(&mut temp_file);
-                    encoder.write_image(
-                        img8.as_raw(),
-                        target_w,
-                        target_h,
-                        ExtendedColorType::Rgb8,
-                    )
+                    encoder.write_image(img8.as_raw(), target_w, target_h, ExtendedColorType::Rgb8)
                 }
                 (OutputFormat::Tiff, BitDepth::Sixteen) => {
                     let mut img16 = resized.to_rgb16();
@@ -585,23 +604,13 @@ impl ExportPipeline {
                         .flat_map(|val| val.to_ne_bytes())
                         .collect();
                     let encoder = image::codecs::tiff::TiffEncoder::new(&mut temp_file);
-                    encoder.write_image(
-                        &raw_bytes,
-                        target_w,
-                        target_h,
-                        ExtendedColorType::Rgb16,
-                    )
+                    encoder.write_image(&raw_bytes, target_w, target_h, ExtendedColorType::Rgb16)
                 }
                 (OutputFormat::Tiff, BitDepth::Eight) => {
                     let mut img8 = resized.to_rgb8();
                     apply_recipe_to_rgb8(&mut img8, &recipe);
                     let encoder = image::codecs::tiff::TiffEncoder::new(&mut temp_file);
-                    encoder.write_image(
-                        img8.as_raw(),
-                        target_w,
-                        target_h,
-                        ExtendedColorType::Rgb8,
-                    )
+                    encoder.write_image(img8.as_raw(), target_w, target_h, ExtendedColorType::Rgb8)
                 }
             };
 

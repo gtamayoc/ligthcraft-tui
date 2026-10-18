@@ -10,20 +10,20 @@
 
 mod common;
 
+#[path = "../src/engine/mod.rs"]
+pub mod engine;
 #[path = "../src/error.rs"]
 pub mod error;
 #[path = "../src/mcp/mod.rs"]
 pub mod mcp;
-#[path = "../src/engine/mod.rs"]
-pub mod engine;
 #[path = "../src/storage/mod.rs"]
 pub mod storage;
 
+use chrono::Utc;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread;
-use chrono::Utc;
 use tempfile::tempdir;
 
 use common::cr3_integrity::{compute_file_sha256, find_draw_dir, CR3_BASELINE};
@@ -267,12 +267,8 @@ fn test_adv_sec_04_store_load_and_delete_rejects_path_traversal_ids() {
 #[test]
 fn test_adv_sec_05_windows_reserved_device_names() {
     let reserved_names = [
-        "CON", "con", "Con",
-        "PRN", "prn", "Prn",
-        "AUX", "aux", "Aux",
-        "NUL", "nul", "Nul",
-        "COM1", "com1", "COM9", "com9",
-        "LPT1", "lpt1", "LPT9", "lpt9",
+        "CON", "con", "Con", "PRN", "prn", "Prn", "AUX", "aux", "Aux", "NUL", "nul", "Nul", "COM1",
+        "com1", "COM9", "com9", "LPT1", "lpt1", "LPT9", "lpt9",
     ];
 
     for &name in &reserved_names {
@@ -312,19 +308,29 @@ fn test_adv_sec_06_reserved_device_names_store_load_and_delete_behavior() {
         assert!(load_res.is_err(), "Loading '{}' must fail", id);
         // Record empirical error type (either InvalidIdentifier, PathTraversal, or NotFound)
         match load_res.unwrap_err() {
-            StorageError::InvalidIdentifier(_) | StorageError::PathTraversal(_) | StorageError::NotFound(_) => {
+            StorageError::InvalidIdentifier(_)
+            | StorageError::PathTraversal(_)
+            | StorageError::NotFound(_) => {
                 // Safe: does not open device
             }
-            other => panic!("Unexpected error loading reserved device name '{}': {:?}", id, other),
+            other => panic!(
+                "Unexpected error loading reserved device name '{}': {:?}",
+                id, other
+            ),
         }
 
         let del_res = store.delete_preset(id);
         assert!(del_res.is_err(), "Deleting '{}' must fail", id);
         match del_res.unwrap_err() {
-            StorageError::InvalidIdentifier(_) | StorageError::PathTraversal(_) | StorageError::NotFound(_) => {
+            StorageError::InvalidIdentifier(_)
+            | StorageError::PathTraversal(_)
+            | StorageError::NotFound(_) => {
                 // Safe: does not delete/lock device
             }
-            other => panic!("Unexpected error deleting reserved device name '{}': {:?}", id, other),
+            other => panic!(
+                "Unexpected error deleting reserved device name '{}': {:?}",
+                id, other
+            ),
         }
     }
 }
@@ -332,8 +338,14 @@ fn test_adv_sec_06_reserved_device_names_store_load_and_delete_behavior() {
 #[test]
 fn test_adv_sec_07_identifier_boundary_lengths_and_special_chars() {
     // Empty identifier
-    assert!(matches!(validate_identifier(""), Err(StorageError::InvalidIdentifier(_))));
-    assert!(matches!(validate_lookup_target(""), Err(StorageError::InvalidIdentifier(_))));
+    assert!(matches!(
+        validate_identifier(""),
+        Err(StorageError::InvalidIdentifier(_))
+    ));
+    assert!(matches!(
+        validate_lookup_target(""),
+        Err(StorageError::InvalidIdentifier(_))
+    ));
 
     // Exactly 64 chars -> valid
     let id_64 = "a".repeat(64);
@@ -341,7 +353,10 @@ fn test_adv_sec_07_identifier_boundary_lengths_and_special_chars() {
 
     // 65 chars -> exceeds 64 limit
     let id_65 = "a".repeat(65);
-    assert!(matches!(validate_identifier(&id_65), Err(StorageError::InvalidIdentifier(_))));
+    assert!(matches!(
+        validate_identifier(&id_65),
+        Err(StorageError::InvalidIdentifier(_))
+    ));
 
     // 128 chars lookup target -> valid
     let target_128 = "b".repeat(128);
@@ -349,21 +364,40 @@ fn test_adv_sec_07_identifier_boundary_lengths_and_special_chars() {
 
     // 129 chars lookup target -> exceeds 128 limit
     let target_129 = "b".repeat(129);
-    assert!(matches!(validate_lookup_target(&target_129), Err(StorageError::InvalidIdentifier(_))));
+    assert!(matches!(
+        validate_lookup_target(&target_129),
+        Err(StorageError::InvalidIdentifier(_))
+    ));
 
     // Special characters rejected by identifier whitelist
     let special_chars = [
-        "preset name", "preset\tname", "preset\nname",
-        "preset*test", "preset?test", "preset<test", "preset>test",
-        "preset|test", "preset:test", "preset\"test",
-        "preset;rm", "preset$var", "preset`cmd`",
-        "preset&bg", "preset#hash", "preset@at",
-        "prëset", "пресет", "✨preset",
+        "preset name",
+        "preset\tname",
+        "preset\nname",
+        "preset*test",
+        "preset?test",
+        "preset<test",
+        "preset>test",
+        "preset|test",
+        "preset:test",
+        "preset\"test",
+        "preset;rm",
+        "preset$var",
+        "preset`cmd`",
+        "preset&bg",
+        "preset#hash",
+        "preset@at",
+        "prëset",
+        "пресет",
+        "✨preset",
     ];
 
     for &s in &special_chars {
         assert!(
-            matches!(validate_identifier(s), Err(StorageError::InvalidIdentifier(_) | StorageError::PathTraversal(_))),
+            matches!(
+                validate_identifier(s),
+                Err(StorageError::InvalidIdentifier(_) | StorageError::PathTraversal(_))
+            ),
             "validate_identifier must reject special characters in '{}'",
             s
         );
@@ -379,11 +413,19 @@ fn test_adv_builtin_01_all_five_builtins_cannot_be_overwritten() {
     let tmp = tempdir().unwrap();
     let store = PresetStore::with_default_builtins(tmp.path().to_path_buf()).unwrap();
 
-    let builtins = ["cinema", "natural", "bw-high-contrast", "teal-orange", "golden-hour"];
+    let builtins = [
+        "cinema",
+        "natural",
+        "bw-high-contrast",
+        "teal-orange",
+        "golden-hour",
+    ];
 
     for &id in &builtins {
         // Case A: PresetFile has is_builtin: true
-        let mut loaded = store.load_preset_file(id).expect("Builtin should be loadable");
+        let mut loaded = store
+            .load_preset_file(id)
+            .expect("Builtin should be loadable");
         assert!(loaded.metadata.is_builtin);
         loaded.recipe.exposure = 4.99; // Attempt to tamper
 
@@ -395,7 +437,10 @@ fn test_adv_builtin_01_all_five_builtins_cannot_be_overwritten() {
         );
         match save_res.unwrap_err() {
             StorageError::PermissionDenied(msg) => {
-                assert!(msg.to_lowercase().contains("built-in") || msg.to_lowercase().contains("builtin"));
+                assert!(
+                    msg.to_lowercase().contains("built-in")
+                        || msg.to_lowercase().contains("builtin")
+                );
             }
             other => panic!("Expected PermissionDenied for '{}', got {:?}", id, other),
         }
@@ -410,7 +455,10 @@ fn test_adv_builtin_01_all_five_builtins_cannot_be_overwritten() {
             id
         );
         assert!(
-            matches!(save_unflagged.unwrap_err(), StorageError::PermissionDenied(_)),
+            matches!(
+                save_unflagged.unwrap_err(),
+                StorageError::PermissionDenied(_)
+            ),
             "Expected PermissionDenied for built-in ID '{}'",
             id
         );
@@ -430,7 +478,13 @@ fn test_adv_builtin_02_all_five_builtins_cannot_be_deleted() {
     let tmp = tempdir().unwrap();
     let store = PresetStore::with_default_builtins(tmp.path().to_path_buf()).unwrap();
 
-    let builtins = ["cinema", "natural", "bw-high-contrast", "teal-orange", "golden-hour"];
+    let builtins = [
+        "cinema",
+        "natural",
+        "bw-high-contrast",
+        "teal-orange",
+        "golden-hour",
+    ];
 
     for &id in &builtins {
         // Delete by exact slug ID
@@ -444,7 +498,10 @@ fn test_adv_builtin_02_all_five_builtins_cannot_be_deleted() {
             StorageError::PermissionDenied(msg) => {
                 assert!(msg.contains("built-in"));
             }
-            other => panic!("Expected PermissionDenied for delete '{}', got {:?}", id, other),
+            other => panic!(
+                "Expected PermissionDenied for delete '{}', got {:?}",
+                id, other
+            ),
         }
 
         // Delete by uppercase ID
@@ -557,7 +614,8 @@ fn test_adv_builtin_05_case_insensitive_reservation_desync_finding() {
     // 2. Empirical verification: list_presets lists both "cinema" and "Cinema"
     let list = store.list_presets().unwrap();
     assert_eq!(
-        list.len(), 6,
+        list.len(),
+        6,
         "list_presets has 6 entries because deduplication is case-sensitive"
     );
     assert!(list.iter().any(|m| m.id == "cinema" && m.is_builtin));
@@ -577,7 +635,10 @@ fn test_adv_builtin_05_case_insensitive_reservation_desync_finding() {
         "delete_preset('Cinema') returns PermissionDenied because delete uses eq_ignore_ascii_case!"
     );
     // The file remains trapped on disk:
-    assert!(saved_path.is_file(), "File 'Cinema.toml' remains trapped on disk");
+    assert!(
+        saved_path.is_file(),
+        "File 'Cinema.toml' remains trapped on disk"
+    );
 }
 
 #[test]
@@ -627,7 +688,10 @@ fn test_adv_import_01_import_preset_validation() {
 
     // 4. Test importing nonexistent file
     let nonexistent = ext_dir.path().join("missing.toml");
-    assert!(matches!(store.import_preset(&nonexistent), Err(StorageError::NotFound(_))));
+    assert!(matches!(
+        store.import_preset(&nonexistent),
+        Err(StorageError::NotFound(_))
+    ));
 }
 
 #[test]
@@ -638,7 +702,9 @@ fn test_adv_export_01_export_preset_validation() {
     let export_dir = tempdir().unwrap();
 
     // 1. Export built-in preset to JSON
-    let exported = store.export_preset("golden-hour", export_dir.path(), PresetFormat::Json).unwrap();
+    let exported = store
+        .export_preset("golden-hour", export_dir.path(), PresetFormat::Json)
+        .unwrap();
     assert!(exported.is_file());
     assert_eq!(exported.extension().unwrap(), "json");
 
@@ -739,7 +805,10 @@ fn test_adv_atomic_03_failed_write_unwritable_target_leaves_no_orphans() {
     let p = make_test_preset("blocked", "Blocked Preset", false);
     // Persist must fail because target_path is a directory
     let res = store.save_preset(&p, PresetFormat::Toml);
-    assert!(res.is_err(), "save_preset MUST fail when target is an existing directory");
+    assert!(
+        res.is_err(),
+        "save_preset MUST fail when target is an existing directory"
+    );
     assert!(matches!(res.unwrap_err(), StorageError::Io { .. }));
 
     // Check directory: temporary file MUST be automatically cleaned up by tempfile drop
@@ -781,7 +850,9 @@ fn test_adv_atomic_04_concurrent_saves_no_corruption() {
                 } else {
                     PresetFormat::Json
                 };
-                store_clone.save_preset(&p, fmt).expect("Concurrent distinct save failed");
+                store_clone
+                    .save_preset(&p, fmt)
+                    .expect("Concurrent distinct save failed");
             } else {
                 let mut p = make_test_preset("contested", "Contested Preset", false);
                 p.recipe.exposure = (i as f32) * 0.1;
@@ -798,12 +869,16 @@ fn test_adv_atomic_04_concurrent_saves_no_corruption() {
     // Verify all distinct presets are loadable and valid
     for i in 0..8 {
         let id = format!("concurrent-preset-{}", i);
-        let loaded = store.load_preset(&id).expect("Should load concurrent preset");
+        let loaded = store
+            .load_preset(&id)
+            .expect("Should load concurrent preset");
         assert_eq!(loaded.exposure, 0.42);
     }
 
     // Verify contested preset is valid, uncorrupted TOML
-    let contested = store.load_preset("contested").expect("Contested preset should be loadable");
+    let contested = store
+        .load_preset("contested")
+        .expect("Contested preset should be loadable");
     assert!(contested.exposure >= 0.8 && contested.exposure <= 1.6);
 
     // Verify zero orphaned temporary files in directory
@@ -872,13 +947,18 @@ fn test_adv_cr3_01_authoritative_sha256_verification_before_and_after() {
             assert!(
                 hash.eq_ignore_ascii_case(entry.expected_sha256),
                 "Pre-flight SHA-256 mismatch on {}: expected {}, got {}",
-                entry.filename, entry.expected_sha256, hash
+                entry.filename,
+                entry.expected_sha256,
+                hash
             );
 
             pre_hashes.push((entry.filename, hash, size));
         }
     }
-    assert!(!pre_hashes.is_empty(), "At least one source RAW file must be present for testing");
+    assert!(
+        !pre_hashes.is_empty(),
+        "At least one source RAW file must be present for testing"
+    );
 
     // PERFORM MASSIVE PRESET OPERATIONS (simulate high filesystem activity)
     let tmp = tempdir().unwrap();

@@ -1,7 +1,7 @@
 //! Strongly-typed wrappers and schema models for LightCraft 0.8.0 MCP tools.
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // ============================================================================
 // Tool 1: import

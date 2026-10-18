@@ -105,10 +105,7 @@ pub enum IntegrityViolationError {
     },
 
     #[error("Destination conflict: target export path '{path}' resolves inside source directory '{source_dir}'")]
-    SourceDirectoryContamination {
-        path: PathBuf,
-        source_dir: PathBuf,
-    },
+    SourceDirectoryContamination { path: PathBuf, source_dir: PathBuf },
 
     #[error("Export destination '{target}' contains prohibited path traversal ('..')")]
     PathTraversal { target: PathBuf },
@@ -165,19 +162,13 @@ pub enum StorageError {
     AlreadyExists(String),
 
     #[error("Invalid preset format at '{path}': {reason}")]
-    InvalidFormat {
-        path: PathBuf,
-        reason: String,
-    },
+    InvalidFormat { path: PathBuf, reason: String },
 
     #[error("Permission denied for preset operation: {0}")]
     PermissionDenied(String),
 
     #[error("Corrupted preset file at '{path}': {reason}")]
-    CorruptedFile {
-        path: PathBuf,
-        reason: String,
-    },
+    CorruptedFile { path: PathBuf, reason: String },
 
     #[error("Security violation: path traversal detected in identifier '{0}'")]
     PathTraversal(String),
@@ -238,4 +229,3 @@ pub enum AppError {
 }
 
 pub type Result<T, E = AppError> = std::result::Result<T, E>;
-

@@ -39,8 +39,7 @@ impl TerminalGuard {
         if is_tty {
             Self::maximize_window();
             enable_raw_mode().map_err(AppError::Io)?;
-            execute!(out, EnterAlternateScreen, EnableMouseCapture, Hide)
-                .map_err(AppError::Io)?;
+            execute!(out, EnterAlternateScreen, EnableMouseCapture, Hide).map_err(AppError::Io)?;
         }
 
         let backend = CrosstermBackend::new(out);

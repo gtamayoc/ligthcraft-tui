@@ -39,7 +39,9 @@ use lightcraft_tui::queue::{
     AspectRatio, BatchFilter, BatchJobStatus, BatchStrategy, BatchWorkerPool, DirectoryScanner,
     DirectoryScannerConfig, Orientation, ScannedPhoto, StrategyEngine, WorkerPoolConfig,
 };
-use lightcraft_tui::storage::presets_store::{PresetFile, PresetFormat, PresetMetadata, PresetStore};
+use lightcraft_tui::storage::presets_store::{
+    PresetFile, PresetFormat, PresetMetadata, PresetStore,
+};
 use lightcraft_tui::tui::mode_a::{
     composite_wiper, compute_variant_grid_rects, ColorLabel, FlagStatus, HistogramData, LoupeState,
     ModeAState, ModeAView, PhotoMetadata, SplitViewKind, VariantRenderStatus, VariantSlot,
@@ -56,7 +58,11 @@ async fn test_tier4_workload1_full_cr3_multi_recipe_production_batch() {
 
     // 1. Cryptographic pre-flight SHA-256 baseline check
     let pre_baseline = verify_cr3_baseline(&draw_dir).expect("Pre-flight SHA-256 baseline check");
-    assert_eq!(pre_baseline.len(), 5, "Must have exactly 5 Canon CR3 master files");
+    assert_eq!(
+        pre_baseline.len(),
+        5,
+        "Must have exactly 5 Canon CR3 master files"
+    );
 
     let tmp = tempdir().expect("tempdir");
     let out_dir = tmp.path().join("client_gallery");
@@ -97,7 +103,11 @@ async fn test_tier4_workload1_full_cr3_multi_recipe_production_batch() {
 
     for (file_idx, &cr3_name) in cr3_files.iter().enumerate() {
         let cr3_path = draw_dir.join(cr3_name);
-        assert!(cr3_path.exists(), "CR3 master file must exist: {}", cr3_name);
+        assert!(
+            cr3_path.exists(),
+            "CR3 master file must exist: {}",
+            cr3_name
+        );
 
         for (preset_idx, preset) in presets.iter().enumerate() {
             executed_jobs += 1;
@@ -125,11 +135,29 @@ async fn test_tier4_workload1_full_cr3_multi_recipe_production_batch() {
 
             let outcome = res.unwrap();
             match outcome {
-                ExportOutcome::Success { output_path, width, height, bytes_written, .. } => {
+                ExportOutcome::Success {
+                    output_path,
+                    width,
+                    height,
+                    bytes_written,
+                    ..
+                } => {
                     assert!(output_path.exists(), "Output file must exist on disk");
-                    assert!(bytes_written > 10_000, "Output file too small (bytes={})", bytes_written);
-                    assert!(width <= 2048 && height <= 2048, "Dimensions must fit within 2048px");
-                    assert!(width > 500 && height > 500, "Dimensions too small: {}x{}", width, height);
+                    assert!(
+                        bytes_written > 10_000,
+                        "Output file too small (bytes={})",
+                        bytes_written
+                    );
+                    assert!(
+                        width <= 2048 && height <= 2048,
+                        "Dimensions must fit within 2048px"
+                    );
+                    assert!(
+                        width > 500 && height > 500,
+                        "Dimensions too small: {}x{}",
+                        width,
+                        height
+                    );
 
                     // Verify real JPEG SOI marker
                     let mut file = File::open(&output_path).expect("open exported file");
@@ -144,8 +172,15 @@ async fn test_tier4_workload1_full_cr3_multi_recipe_production_batch() {
         }
     }
 
-    assert_eq!(executed_jobs, 20, "Must have executed exactly 20 jobs (5 photos x 4 recipes)");
-    assert_eq!(generated_paths.len(), 20, "Must have generated exactly 20 output JPEGs");
+    assert_eq!(
+        executed_jobs, 20,
+        "Must have executed exactly 20 jobs (5 photos x 4 recipes)"
+    );
+    assert_eq!(
+        generated_paths.len(),
+        20,
+        "Must have generated exactly 20 output JPEGs"
+    );
 
     // 2. Cryptographic post-flight SHA-256 baseline check: 100% byte-for-byte immutability
     let post_baseline = verify_cr3_baseline(&draw_dir).expect("Post-flight SHA-256 baseline check");
@@ -205,9 +240,19 @@ async fn test_tier4_workload2_multi_format_archival_master_export() {
     };
 
     let tiff_res = pipeline.execute_export(None, &tiff_job).await;
-    assert!(tiff_res.is_ok(), "16-bit TIFF export failed: {:?}", tiff_res.err());
+    assert!(
+        tiff_res.is_ok(),
+        "16-bit TIFF export failed: {:?}",
+        tiff_res.err()
+    );
     let tiff_path = match tiff_res.unwrap() {
-        ExportOutcome::Success { output_path, width, height, bytes_written, .. } => {
+        ExportOutcome::Success {
+            output_path,
+            width,
+            height,
+            bytes_written,
+            ..
+        } => {
             assert!(output_path.exists());
             assert!(bytes_written > 100_000, "16-bit TIFF should be large");
             // Check TIFF header (II or MM)
@@ -250,10 +295,19 @@ async fn test_tier4_workload2_multi_format_archival_master_export() {
     let png_res = pipeline.execute_export(None, &png_job).await;
     assert!(png_res.is_ok(), "PNG export failed: {:?}", png_res.err());
     let png_path = match png_res.unwrap() {
-        ExportOutcome::Success { output_path, width, height, bytes_written, .. } => {
+        ExportOutcome::Success {
+            output_path,
+            width,
+            height,
+            bytes_written,
+            ..
+        } => {
             assert!(output_path.exists());
             let bytes = std::fs::read(&output_path).unwrap();
-            assert_eq!(&bytes[0..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+            assert_eq!(
+                &bytes[0..8],
+                &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+            );
             output_path
         }
         other => panic!("Expected Success, got {:?}", other),
@@ -289,7 +343,13 @@ async fn test_tier4_workload2_multi_format_archival_master_export() {
     let jpeg_res = pipeline.execute_export(None, &jpeg_job).await;
     assert!(jpeg_res.is_ok(), "JPEG export failed: {:?}", jpeg_res.err());
     let jpeg_path = match jpeg_res.unwrap() {
-        ExportOutcome::Success { output_path, width, height, bytes_written, .. } => {
+        ExportOutcome::Success {
+            output_path,
+            width,
+            height,
+            bytes_written,
+            ..
+        } => {
             assert!(output_path.exists());
             let bytes = std::fs::read(&output_path).unwrap();
             assert_eq!(&bytes[0..2], &[0xFF, 0xD8]);
@@ -376,7 +436,10 @@ async fn test_tier4_workload3_collision_stress_and_rerun_idempotency() {
     job_skip.collision_policy = CollisionPolicy::Skip;
     let res3 = pipeline.execute_export(None, &job_skip).await.unwrap();
     match res3 {
-        ExportOutcome::Skipped { target_path, reason } => {
+        ExportOutcome::Skipped {
+            target_path,
+            reason,
+        } => {
             assert_eq!(target_path.file_name().unwrap(), "IMG_0590__Cinema.jpg");
             assert!(reason.contains("Skip"));
         }
@@ -455,8 +518,16 @@ async fn test_tier4_workload4_mode_a_interactive_creative_session() {
         variants: vec![
             VariantSlot::new(0, "Natural".into(), BuiltinPreset::Natural.recipe()),
             VariantSlot::new(1, "Cinema".into(), BuiltinPreset::Cinema.recipe()),
-            VariantSlot::new(2, "B&W High Contrast".into(), BuiltinPreset::BwHighContrast.recipe()),
-            VariantSlot::new(3, "Teal & Orange".into(), BuiltinPreset::TealOrange.recipe()),
+            VariantSlot::new(
+                2,
+                "B&W High Contrast".into(),
+                BuiltinPreset::BwHighContrast.recipe(),
+            ),
+            VariantSlot::new(
+                3,
+                "Teal & Orange".into(),
+                BuiltinPreset::TealOrange.recipe(),
+            ),
         ],
         split_kind: SplitViewKind::SideBySide,
         split_ratio: 0.5,

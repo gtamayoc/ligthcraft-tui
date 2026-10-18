@@ -2,8 +2,8 @@
 //!
 //! Complies with LightCraft 0.8.0 develop parameter specifications (122 controls, 14 sections).
 
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::mcp::tools::{
     BwMixSettings, CurveSettings, GradingSettings, GrainSettings, MixerSettings,
@@ -299,22 +299,46 @@ impl DevelopSlider {
     /// Physical slider bounds and presentation parameters.
     pub fn bounds(&self) -> SliderBounds {
         match self {
-            Self::Exposure => SliderBounds::new(-5.0, 5.0, 0.0, 0.05, 2, " EV", TrackKind::Centered),
-            Self::Contrast => SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Centered),
-            Self::Highlights => SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Centered),
-            Self::Shadows => SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Centered),
+            Self::Exposure => {
+                SliderBounds::new(-5.0, 5.0, 0.0, 0.05, 2, " EV", TrackKind::Centered)
+            }
+            Self::Contrast => {
+                SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Centered)
+            }
+            Self::Highlights => {
+                SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Centered)
+            }
+            Self::Shadows => {
+                SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Centered)
+            }
             Self::Whites => SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Centered),
             Self::Blacks => SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Centered),
-            Self::Temperature => SliderBounds::new(2000.0, 50000.0, 5500.0, 50.0, 0, " K", TrackKind::Temp),
+            Self::Temperature => {
+                SliderBounds::new(2000.0, 50000.0, 5500.0, 50.0, 0, " K", TrackKind::Temp)
+            }
             Self::Tint => SliderBounds::new(-150.0, 150.0, 0.0, 1.0, 0, "", TrackKind::Tint),
-            Self::Vibrance => SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Gradient),
-            Self::Saturation => SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Gradient),
-            Self::Clarity => SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Centered),
+            Self::Vibrance => {
+                SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Gradient)
+            }
+            Self::Saturation => {
+                SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Gradient)
+            }
+            Self::Clarity => {
+                SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Centered)
+            }
             Self::Dehaze => SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Centered),
-            Self::SharpenAmount | Self::Sharpening => SliderBounds::new(0.0, 150.0, 0.0, 1.0, 0, "", TrackKind::Plain),
-            Self::NrLuminance | Self::LuminanceNr => SliderBounds::new(0.0, 100.0, 0.0, 1.0, 0, "", TrackKind::Plain),
-            Self::NrColor | Self::ColorNr => SliderBounds::new(0.0, 100.0, 0.0, 1.0, 0, "", TrackKind::Plain),
-            Self::Vignette => SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Centered),
+            Self::SharpenAmount | Self::Sharpening => {
+                SliderBounds::new(0.0, 150.0, 0.0, 1.0, 0, "", TrackKind::Plain)
+            }
+            Self::NrLuminance | Self::LuminanceNr => {
+                SliderBounds::new(0.0, 100.0, 0.0, 1.0, 0, "", TrackKind::Plain)
+            }
+            Self::NrColor | Self::ColorNr => {
+                SliderBounds::new(0.0, 100.0, 0.0, 1.0, 0, "", TrackKind::Plain)
+            }
+            Self::Vignette => {
+                SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "%", TrackKind::Centered)
+            }
             Self::Custom(_) => SliderBounds::new(-100.0, 100.0, 0.0, 1.0, 0, "", TrackKind::Plain),
         }
     }
@@ -551,21 +575,51 @@ impl Recipe {
         let mut out = self.clone();
 
         // 1. Scale 15 relative core sliders
-        out.exposure = DevelopSlider::Exposure.bounds().clamp((self.exposure as f64 * i) as f32);
-        out.contrast = DevelopSlider::Contrast.bounds().clamp((self.contrast as f64 * i) as f32);
-        out.highlights = DevelopSlider::Highlights.bounds().clamp((self.highlights as f64 * i) as f32);
-        out.shadows = DevelopSlider::Shadows.bounds().clamp((self.shadows as f64 * i) as f32);
-        out.whites = DevelopSlider::Whites.bounds().clamp((self.whites as f64 * i) as f32);
-        out.blacks = DevelopSlider::Blacks.bounds().clamp((self.blacks as f64 * i) as f32);
-        out.tint = DevelopSlider::Tint.bounds().clamp((self.tint as f64 * i) as f32);
-        out.vibrance = DevelopSlider::Vibrance.bounds().clamp((self.vibrance as f64 * i) as f32);
-        out.saturation = DevelopSlider::Saturation.bounds().clamp((self.saturation as f64 * i) as f32);
-        out.clarity = DevelopSlider::Clarity.bounds().clamp((self.clarity as f64 * i) as f32);
-        out.dehaze = DevelopSlider::Dehaze.bounds().clamp((self.dehaze as f64 * i) as f32);
-        out.sharpen_amount = DevelopSlider::SharpenAmount.bounds().clamp((self.sharpen_amount as f64 * i) as f32);
-        out.nr_luminance = DevelopSlider::NrLuminance.bounds().clamp((self.nr_luminance as f64 * i) as f32);
-        out.nr_color = DevelopSlider::NrColor.bounds().clamp((self.nr_color as f64 * i) as f32);
-        out.vignette = DevelopSlider::Vignette.bounds().clamp((self.vignette as f64 * i) as f32);
+        out.exposure = DevelopSlider::Exposure
+            .bounds()
+            .clamp((self.exposure as f64 * i) as f32);
+        out.contrast = DevelopSlider::Contrast
+            .bounds()
+            .clamp((self.contrast as f64 * i) as f32);
+        out.highlights = DevelopSlider::Highlights
+            .bounds()
+            .clamp((self.highlights as f64 * i) as f32);
+        out.shadows = DevelopSlider::Shadows
+            .bounds()
+            .clamp((self.shadows as f64 * i) as f32);
+        out.whites = DevelopSlider::Whites
+            .bounds()
+            .clamp((self.whites as f64 * i) as f32);
+        out.blacks = DevelopSlider::Blacks
+            .bounds()
+            .clamp((self.blacks as f64 * i) as f32);
+        out.tint = DevelopSlider::Tint
+            .bounds()
+            .clamp((self.tint as f64 * i) as f32);
+        out.vibrance = DevelopSlider::Vibrance
+            .bounds()
+            .clamp((self.vibrance as f64 * i) as f32);
+        out.saturation = DevelopSlider::Saturation
+            .bounds()
+            .clamp((self.saturation as f64 * i) as f32);
+        out.clarity = DevelopSlider::Clarity
+            .bounds()
+            .clamp((self.clarity as f64 * i) as f32);
+        out.dehaze = DevelopSlider::Dehaze
+            .bounds()
+            .clamp((self.dehaze as f64 * i) as f32);
+        out.sharpen_amount = DevelopSlider::SharpenAmount
+            .bounds()
+            .clamp((self.sharpen_amount as f64 * i) as f32);
+        out.nr_luminance = DevelopSlider::NrLuminance
+            .bounds()
+            .clamp((self.nr_luminance as f64 * i) as f32);
+        out.nr_color = DevelopSlider::NrColor
+            .bounds()
+            .clamp((self.nr_color as f64 * i) as f32);
+        out.vignette = DevelopSlider::Vignette
+            .bounds()
+            .clamp((self.vignette as f64 * i) as f32);
 
         // 2. Absolute Temperature (Kelvin): base standard daylight is 5500K
         if let Some(target_temp) = self.temperature {
@@ -701,7 +755,10 @@ impl Recipe {
             let base = baseline_temp.unwrap_or(6500.0);
             let delta = (target_temp as f64) - base;
             let scaled_temp = (base + delta * i).clamp(2000.0, 50000.0);
-            map.insert(DevelopSlider::Temperature.control_id().to_string(), scaled_temp);
+            map.insert(
+                DevelopSlider::Temperature.control_id().to_string(),
+                scaled_temp,
+            );
         }
 
         // Extensibility map scaling

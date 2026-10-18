@@ -1,14 +1,14 @@
 //! Memory-budgeted dual-tier LRU preview cache.
 //! Eliminates memory leaks and UI stalls during rapid photo navigation.
 
-use std::fmt;
-use std::num::NonZeroUsize;
-use std::sync::Arc;
 use image::DynamicImage;
 use lru::LruCache;
 use ratatui::layout::Rect;
 use ratatui_image::picker::ProtocolType;
 use ratatui_image::protocol::Protocol;
+use std::fmt;
+use std::num::NonZeroUsize;
+use std::sync::Arc;
 
 /// Hashable protocol kind for cache key identity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -101,12 +101,7 @@ impl PreviewCache {
     }
 
     /// Store a pre-rendered protocol into Tier 1 cache, updating memory tracking and evicting if necessary.
-    pub fn insert_protocol(
-        &mut self,
-        key: PreviewCacheKey,
-        protocol: Protocol,
-        render_area: Rect,
-    ) {
+    pub fn insert_protocol(&mut self, key: PreviewCacheKey, protocol: Protocol, render_area: Rect) {
         let byte_size = Self::estimate_protocol_bytes(&protocol, render_area);
         let cached = CachedProtocol {
             protocol: Arc::new(protocol),
@@ -122,7 +117,11 @@ impl PreviewCache {
     }
 
     /// Retrieve a decoded master image from Tier 2 cache.
-    pub fn get_source_image(&mut self, photo_id: &str, recipe_hash: u64) -> Option<Arc<DynamicImage>> {
+    pub fn get_source_image(
+        &mut self,
+        photo_id: &str,
+        recipe_hash: u64,
+    ) -> Option<Arc<DynamicImage>> {
         let key = format!("{}:{:016x}", photo_id, recipe_hash);
         self.image_lru.get(&key).map(|(img, _)| Arc::clone(img))
     }

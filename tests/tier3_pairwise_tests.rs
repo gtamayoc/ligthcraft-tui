@@ -17,13 +17,13 @@
 
 mod common;
 
+use chrono::Utc;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use chrono::Utc;
 use tempfile::tempdir;
 
 use image::{DynamicImage, GenericImageView, RgbImage, Rgba};
@@ -46,7 +46,9 @@ use lightcraft_tui::queue::{
     AspectRatio, BatchFilter, BatchJobStatus, BatchStrategy, BatchWorkerPool, DirectoryScanner,
     DirectoryScannerConfig, Orientation, ScannedPhoto, StrategyEngine, WorkerPoolConfig,
 };
-use lightcraft_tui::storage::presets_store::{PresetFile, PresetFormat, PresetMetadata, PresetStore};
+use lightcraft_tui::storage::presets_store::{
+    PresetFile, PresetFormat, PresetMetadata, PresetStore,
+};
 use lightcraft_tui::tui::mode_a::{
     composite_wiper, compute_variant_grid_rects, ColorLabel, FlagStatus, HistogramData, LoupeState,
     ModeAState, ModeAView, PhotoMetadata, SplitViewKind, VariantRenderStatus, VariantSlot,
@@ -266,9 +268,21 @@ async fn test_tier3_scenario3_cr3_raw_multi_format_variations() {
             };
 
             let res = pipeline.execute_export(None, &job).await;
-            assert!(res.is_ok(), "Export failed for {:?} with {:?}", preset, format);
+            assert!(
+                res.is_ok(),
+                "Export failed for {:?} with {:?}",
+                preset,
+                format
+            );
             let outcome = res.unwrap();
-            if let ExportOutcome::Success { output_path, width, height, bytes_written, .. } = outcome {
+            if let ExportOutcome::Success {
+                output_path,
+                width,
+                height,
+                bytes_written,
+                ..
+            } = outcome
+            {
                 assert!(output_path.exists());
                 assert!(bytes_written > 0);
                 assert!(width <= 600 && height <= 400);
@@ -279,7 +293,11 @@ async fn test_tier3_scenario3_cr3_raw_multi_format_variations() {
                         assert_eq!(&data[0..2], &[0xFF, 0xD8], "JPEG header");
                     }
                     OutputFormat::Png => {
-                        assert_eq!(&data[0..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], "PNG header");
+                        assert_eq!(
+                            &data[0..8],
+                            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A],
+                            "PNG header"
+                        );
                     }
                     OutputFormat::Tiff => {
                         let is_le = &data[0..4] == &[0x49, 0x49, 0x2A, 0x00];
@@ -299,7 +317,11 @@ async fn test_tier3_scenario3_cr3_raw_multi_format_variations() {
         if path.is_file() {
             let (hash, size) = lightcraft_tui::mcp::integrity::compute_file_sha256(&path)
                 .expect("Failed reading present file");
-            assert_eq!(size, entry.expected_size, "Size mismatch for {}", entry.filename);
+            assert_eq!(
+                size, entry.expected_size,
+                "Size mismatch for {}",
+                entry.filename
+            );
             assert!(
                 hash.eq_ignore_ascii_case(entry.expected_sha256),
                 "SHA-256 mismatch for {}",
@@ -323,8 +345,16 @@ async fn test_tier3_scenario4_favorite_flagging_and_selective_export() {
     let mut variants = vec![
         VariantSlot::new(0, "Natural".into(), BuiltinPreset::Natural.recipe()),
         VariantSlot::new(1, "Cinema".into(), BuiltinPreset::Cinema.recipe()),
-        VariantSlot::new(2, "B&W High Contrast".into(), BuiltinPreset::BwHighContrast.recipe()),
-        VariantSlot::new(3, "Teal & Orange".into(), BuiltinPreset::TealOrange.recipe()),
+        VariantSlot::new(
+            2,
+            "B&W High Contrast".into(),
+            BuiltinPreset::BwHighContrast.recipe(),
+        ),
+        VariantSlot::new(
+            3,
+            "Teal & Orange".into(),
+            BuiltinPreset::TealOrange.recipe(),
+        ),
     ];
 
     // Flag variants 1 (Cinema) and 3 (Teal & Orange) as favorites
@@ -413,7 +443,10 @@ fn test_tier3_scenario5_dynamic_terminal_resizing_and_graphic_protocols() {
     }
 
     // 3. Image aspect ratio downscaling fits inside terminal cells
-    let font_size = FontSize { width: 8, height: 16 };
+    let font_size = FontSize {
+        width: 8,
+        height: 16,
+    };
     let pane = Rect::new(0, 0, 80, 40);
     let fit = ImageRenderer::calculate_fit(6000, 4000, font_size, pane);
     assert!(fit.render_area.width <= 80);
@@ -522,7 +555,8 @@ async fn test_tier3_scenario7_batch_concurrency_and_controls() {
 #[test]
 fn test_tier3_scenario8_custom_preset_creation_persistence_batch() {
     let tmp = tempdir().expect("tempdir");
-    let store = PresetStore::with_default_builtins(tmp.path().to_path_buf()).expect("PresetStore creation");
+    let store =
+        PresetStore::with_default_builtins(tmp.path().to_path_buf()).expect("PresetStore creation");
 
     // 1. Create custom recipe
     let mut custom_recipe = Recipe::default();
@@ -553,11 +587,15 @@ fn test_tier3_scenario8_custom_preset_creation_persistence_batch() {
     let preset_file = PresetFile::new(meta, custom_recipe);
 
     // 2. Persist to disk as TOML
-    store.save_preset(&preset_file, PresetFormat::Toml).expect("Save preset");
+    store
+        .save_preset(&preset_file, PresetFormat::Toml)
+        .expect("Save preset");
     assert!(tmp.path().join("my-vintage-look.toml").exists());
 
     // 3. Load from disk and verify byte-for-byte fidelity
-    let loaded = store.load_preset_file("my-vintage-look").expect("Load preset");
+    let loaded = store
+        .load_preset_file("my-vintage-look")
+        .expect("Load preset");
     assert_eq!(loaded.metadata.id, "my-vintage-look");
     assert_eq!(loaded.metadata.name, "My Vintage Look");
     assert_eq!(loaded.recipe.exposure, 0.30);

@@ -17,9 +17,9 @@ use std::time::Duration;
 
 use lightcraft_tui::engine::presets::BuiltinPreset;
 use lightcraft_tui::queue::{
-    AspectRatio, BatchFilter, BatchJobStatus, BatchStrategy, BatchTelemetry,
-    BatchWorkerPool, DirectoryScanner, DirectoryScannerConfig, Orientation, ScannedPhoto,
-    StrategyEngine, WorkerPoolConfig,
+    AspectRatio, BatchFilter, BatchJobStatus, BatchStrategy, BatchTelemetry, BatchWorkerPool,
+    DirectoryScanner, DirectoryScannerConfig, Orientation, ScannedPhoto, StrategyEngine,
+    WorkerPoolConfig,
 };
 
 fn create_sample_scanned_photo(name: &str, is_cr3: bool) -> ScannedPhoto {
@@ -123,7 +123,10 @@ async fn test_t1_que02_bounded_multi_worker_concurrency_four() {
 
 #[tokio::test]
 async fn test_t1_que03_interactive_pause() {
-    let pool = Arc::new(BatchWorkerPool::new(WorkerPoolConfig { concurrency: 2 }, None));
+    let pool = Arc::new(BatchWorkerPool::new(
+        WorkerPoolConfig { concurrency: 2 },
+        None,
+    ));
 
     assert!(!pool.is_paused());
     pool.pause();
@@ -139,7 +142,10 @@ async fn test_t1_que03_interactive_pause() {
 
 #[tokio::test]
 async fn test_t1_que04_queue_resume_continuity() {
-    let pool = Arc::new(BatchWorkerPool::new(WorkerPoolConfig { concurrency: 1 }, None));
+    let pool = Arc::new(BatchWorkerPool::new(
+        WorkerPoolConfig { concurrency: 1 },
+        None,
+    ));
 
     let photos = vec![
         create_sample_scanned_photo("IMG_0588", true),
@@ -155,9 +161,7 @@ async fn test_t1_que04_queue_resume_continuity() {
     pool.pause();
     let pool_clone = pool.clone();
 
-    let runner = tokio::spawn(async move {
-        pool_clone.run_queue(jobs, None).await
-    });
+    let runner = tokio::spawn(async move { pool_clone.run_queue(jobs, None).await });
 
     // Let the worker see paused state
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -175,7 +179,10 @@ async fn test_t1_que04_queue_resume_continuity() {
 
 #[tokio::test]
 async fn test_t1_que05_queue_cancellation_and_artifact_retention() {
-    let pool = Arc::new(BatchWorkerPool::new(WorkerPoolConfig { concurrency: 1 }, None));
+    let pool = Arc::new(BatchWorkerPool::new(
+        WorkerPoolConfig { concurrency: 1 },
+        None,
+    ));
 
     let photos = vec![
         create_sample_scanned_photo("IMG_0588", true),
@@ -201,7 +208,10 @@ async fn test_t1_que05_queue_cancellation_and_artifact_retention() {
         .iter()
         .filter(|j| matches!(j.status, BatchJobStatus::Cancelled))
         .count();
-    assert!(cancelled_count > 0, "At least some jobs should be marked Cancelled");
+    assert!(
+        cancelled_count > 0,
+        "At least some jobs should be marked Cancelled"
+    );
 }
 
 // ============================================================================
@@ -331,7 +341,10 @@ fn test_t1_que09_telemetry_rolling_eta_math() {
 
 #[tokio::test]
 async fn test_t1_que10_rapid_pause_resume_cycling() {
-    let pool = Arc::new(BatchWorkerPool::new(WorkerPoolConfig { concurrency: 4 }, None));
+    let pool = Arc::new(BatchWorkerPool::new(
+        WorkerPoolConfig { concurrency: 4 },
+        None,
+    ));
 
     // Rapidly toggle pause/resume across 20 cycles
     for _ in 0..20 {

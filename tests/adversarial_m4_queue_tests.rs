@@ -32,11 +32,17 @@ fn create_dummy_file(path: &Path, content: &[u8]) {
         fs::create_dir_all(parent).expect("Failed to create parent dirs");
     }
     let mut file = File::create(path).expect("Failed to create dummy file");
-    file.write_all(content).expect("Failed to write dummy content");
+    file.write_all(content)
+        .expect("Failed to write dummy content");
 }
 
 /// Helper to construct a synthetic ScannedPhoto.
-fn make_synthetic_photo(id: usize, ext: &str, orient: Orientation, ar: AspectRatio) -> ScannedPhoto {
+fn make_synthetic_photo(
+    id: usize,
+    ext: &str,
+    orient: Orientation,
+    ar: AspectRatio,
+) -> ScannedPhoto {
     let is_cr3 = ext.eq_ignore_ascii_case("cr3");
     let (w, h) = match orient {
         Orientation::Landscape => (6000, 4000),
@@ -167,7 +173,8 @@ fn test_adv_m4_02_iterative_scanner_depth_boundary_enforcement() {
         allowed_extensions: vec!["jpg".into()],
     };
 
-    let results = DirectoryScanner::scan(&config_depth_5).expect("Scan with max_depth 5 must succeed");
+    let results =
+        DirectoryScanner::scan(&config_depth_5).expect("Scan with max_depth 5 must succeed");
     assert_eq!(
         results.len(),
         5,
@@ -182,7 +189,8 @@ fn test_adv_m4_02_iterative_scanner_depth_boundary_enforcement() {
         max_depth: 32,
         allowed_extensions: vec!["jpg".into()],
     };
-    let non_rec_results = DirectoryScanner::scan(&config_non_recursive).expect("Non-recursive scan must succeed");
+    let non_rec_results =
+        DirectoryScanner::scan(&config_non_recursive).expect("Non-recursive scan must succeed");
     assert_eq!(
         non_rec_results.len(),
         0,
@@ -221,9 +229,18 @@ fn test_adv_m4_03_iterative_scanner_pathological_empty_and_special_files() {
     let found_raw = results.iter().any(|p| p.filename == "mixed_case.Cr3");
     let found_no_ext = results.iter().any(|p| p.filename == "no_extension");
 
-    assert!(found_upper, "Scanner must match extensions case-insensitively (.JPG)");
-    assert!(found_raw, "Scanner must match extensions case-insensitively (.Cr3)");
-    assert!(!found_no_ext, "Scanner must ignore files without allowed extension");
+    assert!(
+        found_upper,
+        "Scanner must match extensions case-insensitively (.JPG)"
+    );
+    assert!(
+        found_raw,
+        "Scanner must match extensions case-insensitively (.Cr3)"
+    );
+    assert!(
+        !found_no_ext,
+        "Scanner must ignore files without allowed extension"
+    );
 }
 
 // ============================================================================
@@ -399,7 +416,12 @@ fn test_adv_m4_06_massive_batch_telemetry_throughput_and_eta() {
 
 #[test]
 fn test_adv_m4_07_massive_retry_failed_5000_jobs_partitioning() {
-    let photos = vec![make_synthetic_photo(1, "cr3", Orientation::Landscape, AspectRatio::Ratio3x2)];
+    let photos = vec![make_synthetic_photo(
+        1,
+        "cr3",
+        Orientation::Landscape,
+        AspectRatio::Ratio3x2,
+    )];
     let strategy = BatchStrategy::Uniform {
         recipe: BuiltinPreset::Natural.recipe(),
         intensity: 1.0,
@@ -429,7 +451,10 @@ fn test_adv_m4_07_massive_retry_failed_5000_jobs_partitioning() {
 
     // Retry failed
     let reset_count = BatchWorkerPool::retry_failed(&mut jobs);
-    assert_eq!(reset_count, 2500, "Exactly 2,500 failed jobs must be reset to Queued");
+    assert_eq!(
+        reset_count, 2500,
+        "Exactly 2,500 failed jobs must be reset to Queued"
+    );
 
     // Verify all even jobs are Queued, all odd jobs remain Done
     for (idx, job) in jobs.iter().enumerate() {
@@ -452,7 +477,10 @@ fn test_adv_m4_07_massive_retry_failed_5000_jobs_partitioning() {
 async fn test_adv_m4_08_rapid_50_pause_resume_cycles_during_active_execution() {
     // Wrap entire stress test in a 10s timeout to detect deadlocks or hangs
     tokio::time::timeout(Duration::from_secs(10), async {
-        let pool = Arc::new(BatchWorkerPool::new(WorkerPoolConfig { concurrency: 4 }, None));
+        let pool = Arc::new(BatchWorkerPool::new(
+            WorkerPoolConfig { concurrency: 4 },
+            None,
+        ));
 
         // Use fast thumbnail profile (LongEdge 320px) to prevent pure-CPU encoding
         // starvation from blocking the Tokio async executor on Windows
@@ -530,9 +558,7 @@ async fn test_adv_m4_08_rapid_50_pause_resume_cycles_during_active_execution() {
         }
 
         let pool_runner = pool.clone();
-        let queue_handle = tokio::spawn(async move {
-            pool_runner.run_queue(jobs, None).await
-        });
+        let queue_handle = tokio::spawn(async move { pool_runner.run_queue(jobs, None).await });
 
         // Concurrently execute 50 rapid state transitions (25 pause + 25 resume = 50 transitions)
         // within the 2.0-second requirement window
@@ -564,7 +590,9 @@ async fn test_adv_m4_08_rapid_50_pause_resume_cycles_during_active_execution() {
         );
 
         // Await queue completion without thread hang or deadlock
-        let results = queue_handle.await.expect("Queue runner panicked or crashed");
+        let results = queue_handle
+            .await
+            .expect("Queue runner panicked or crashed");
         assert_eq!(results.len(), 4);
 
         for job in &results {
@@ -582,7 +610,10 @@ async fn test_adv_m4_08_rapid_50_pause_resume_cycles_during_active_execution() {
 #[tokio::test]
 async fn test_adv_m4_09_rapid_concurrent_pause_resume_cancel_race_resilience() {
     tokio::time::timeout(Duration::from_secs(10), async {
-        let pool = Arc::new(BatchWorkerPool::new(WorkerPoolConfig { concurrency: 2 }, None));
+        let pool = Arc::new(BatchWorkerPool::new(
+            WorkerPoolConfig { concurrency: 2 },
+            None,
+        ));
 
         let photos = vec![
             ScannedPhoto {
@@ -636,9 +667,7 @@ async fn test_adv_m4_09_rapid_concurrent_pause_resume_cancel_race_resilience() {
         }
 
         let pool_clone = pool.clone();
-        let queue_handle = tokio::spawn(async move {
-            pool_clone.run_queue(jobs, None).await
-        });
+        let queue_handle = tokio::spawn(async move { pool_clone.run_queue(jobs, None).await });
 
         // Multi-threaded concurrent callers hammering pause, resume, cancel
         let p1 = pool.clone();
@@ -671,7 +700,10 @@ async fn test_adv_m4_09_rapid_concurrent_pause_resume_cancel_race_resilience() {
         // Each job must be cleanly either Done or Cancelled
         for job in &results {
             assert!(
-                matches!(job.status, BatchJobStatus::Done { .. } | BatchJobStatus::Cancelled),
+                matches!(
+                    job.status,
+                    BatchJobStatus::Done { .. } | BatchJobStatus::Cancelled
+                ),
                 "Job status must be clean terminal state: {:?}",
                 job.status
             );
@@ -684,25 +716,26 @@ async fn test_adv_m4_09_rapid_concurrent_pause_resume_cancel_race_resilience() {
 #[tokio::test]
 async fn test_adv_m4_10_queue_deadlock_freedom_under_high_contention() {
     tokio::time::timeout(Duration::from_secs(5), async {
-        let pool = Arc::new(BatchWorkerPool::new(WorkerPoolConfig { concurrency: 1 }, None));
+        let pool = Arc::new(BatchWorkerPool::new(
+            WorkerPoolConfig { concurrency: 1 },
+            None,
+        ));
 
         // Rapid start and immediate pause before any worker dequeues
         pool.pause();
         assert!(pool.is_paused());
 
-        let photos = vec![
-            ScannedPhoto {
-                path: PathBuf::from("DRAW/IMG_0969.CR3"),
-                filename: "IMG_0969.CR3".into(),
-                extension: "cr3".into(),
-                size_bytes: 26_614_589,
-                is_cr3: true,
-                is_selected: true,
-                dimensions: Some((6000, 4000)),
-                orientation: Some(Orientation::Landscape),
-                aspect_ratio: Some(AspectRatio::Ratio3x2),
-            },
-        ];
+        let photos = vec![ScannedPhoto {
+            path: PathBuf::from("DRAW/IMG_0969.CR3"),
+            filename: "IMG_0969.CR3".into(),
+            extension: "cr3".into(),
+            size_bytes: 26_614_589,
+            is_cr3: true,
+            is_selected: true,
+            dimensions: Some((6000, 4000)),
+            orientation: Some(Orientation::Landscape),
+            aspect_ratio: Some(AspectRatio::Ratio3x2),
+        }];
         let strategy = BatchStrategy::Uniform {
             recipe: BuiltinPreset::Natural.recipe(),
             intensity: 1.0,
@@ -710,9 +743,7 @@ async fn test_adv_m4_10_queue_deadlock_freedom_under_high_contention() {
         let jobs = StrategyEngine::expand_jobs(&photos, &strategy, "web_1080p").unwrap();
 
         let pool_runner = pool.clone();
-        let handle = tokio::spawn(async move {
-            pool_runner.run_queue(jobs, None).await
-        });
+        let handle = tokio::spawn(async move { pool_runner.run_queue(jobs, None).await });
 
         // Wait to confirm worker is parked
         tokio::time::sleep(Duration::from_millis(50)).await;

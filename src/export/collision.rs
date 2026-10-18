@@ -1,9 +1,9 @@
 //! Collision handling policies and thread-safe reservation registry (F-EXP-04).
 
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use serde::{Deserialize, Serialize};
 
 use crate::export::ExportError;
 

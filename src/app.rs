@@ -1,18 +1,21 @@
 //! Central application controller, state coordinator, and 60 FPS non-blocking render loop.
 
-use std::path::PathBuf;
-use std::sync::Arc;
-use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use image::DynamicImage;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::engine::presets::BuiltinPreset;
 use crate::engine::recipe::Recipe;
 use crate::error::AppError;
+use crate::export::aspect::{AspectRatio, InteractiveFlowState, JobPlan, WizardStep};
 use crate::graphics::cache::{PreviewCache, PreviewCacheConfig};
 use crate::graphics::protocol::{GraphicsProtocol, ProtocolOverride};
 use crate::mcp::client::McpClient;
@@ -65,6 +68,7 @@ pub struct AppController {
     pub running: bool,
     pub force_clear: bool,
     pub export_prompt: bool,
+    pub flow_state: InteractiveFlowState,
     pub event_sender: Option<tokio::sync::mpsc::Sender<AppEvent>>,
 }
 
@@ -115,8 +119,16 @@ impl AppController {
             mode_a.active_photo = Some(crate::mcp::tools::PhotoInfo {
                 id: 1,
                 file_name: first.filename.clone(),
-                format: if first.is_cr3 { "cr3".into() } else { "image".into() },
-                kind: if first.is_cr3 { "raw".into() } else { "raster".into() },
+                format: if first.is_cr3 {
+                    "cr3".into()
+                } else {
+                    "image".into()
+                },
+                kind: if first.is_cr3 {
+                    "raw".into()
+                } else {
+                    "raster".into()
+                },
                 width: mode_a.metadata.width,
                 height: mode_a.metadata.height,
                 rating: 0,
@@ -148,12 +160,14 @@ impl AppController {
             cache,
             mcp_client,
             preset_store,
-            status_message: "Listo. [↑/↓] Seleccionar Foto | [Tab] Ir a Variantes/Canvas | [E] Exportar".into(),
+            status_message:
+                "Listo. [↑/↓] Seleccionar Foto | [Tab] Ir a Variantes/Canvas | [E] Exportar".into(),
             terminal_size: Rect::new(0, 0, 120, 30),
             needs_render: true,
             running: true,
             force_clear: false,
             export_prompt: false,
+            flow_state: InteractiveFlowState::default(),
             event_sender: None,
         })
     }
@@ -200,7 +214,9 @@ impl AppController {
 
     /// Spawns asynchronous worker tasks to generate preview thumbnails for all variant slots.
     pub fn trigger_variant_previews(&mut self) {
-        let Some(item) = self.items.get(self.selected_index) else { return; };
+        let Some(item) = self.items.get(self.selected_index) else {
+            return;
+        };
         let source_path = item.path.clone();
         let photo_id = item.filename.clone();
         let count = self.mode_a.variant_count;
@@ -210,7 +226,9 @@ impl AppController {
                 started_at: std::time::Instant::now(),
             };
 
-            let Some(ref tx) = self.event_sender else { continue; };
+            let Some(ref tx) = self.event_sender else {
+                continue;
+            };
             let tx_clone = tx.clone();
             let source_clone = source_path.clone();
             let photo_id_clone = photo_id.clone();
@@ -218,42 +236,54 @@ impl AppController {
 
             tokio::spawn(async move {
                 // Timeout watchdog: enforce max 10s per variant to avoid infinite hang
-                let render_fut = tokio::task::spawn_blocking(move || -> Result<DynamicImage, String> {
-                    let dyn_img = crate::export::ExportPipeline::load_source_image(&source_clone, Some(800))
+                let render_fut =
+                    tokio::task::spawn_blocking(move || -> Result<DynamicImage, String> {
+                        let dyn_img = crate::export::ExportPipeline::load_source_image(
+                            &source_clone,
+                            Some(800),
+                        )
                         .map_err(|e| e.to_string())?;
-                    let mut rgb = dyn_img.to_rgb8();
-                    crate::export::apply_recipe_to_rgb8(&mut rgb, &recipe);
-                    Ok(DynamicImage::ImageRgb8(rgb))
-                });
+                        let mut rgb = dyn_img.to_rgb8();
+                        crate::export::apply_recipe_to_rgb8(&mut rgb, &recipe);
+                        Ok(DynamicImage::ImageRgb8(rgb))
+                    });
 
                 match tokio::time::timeout(std::time::Duration::from_secs(10), render_fut).await {
                     Ok(Ok(Ok(rendered))) => {
-                        let _ = tx_clone.send(AppEvent::VariantReady {
-                            photo_id: photo_id_clone,
-                            slot_index: idx,
-                            image: Arc::new(rendered),
-                        }).await;
+                        let _ = tx_clone
+                            .send(AppEvent::VariantReady {
+                                photo_id: photo_id_clone,
+                                slot_index: idx,
+                                image: Arc::new(rendered),
+                            })
+                            .await;
                     }
                     Ok(Ok(Err(err))) => {
-                        let _ = tx_clone.send(AppEvent::VariantFailed {
-                            photo_id: photo_id_clone,
-                            slot_index: idx,
-                            error: err,
-                        }).await;
+                        let _ = tx_clone
+                            .send(AppEvent::VariantFailed {
+                                photo_id: photo_id_clone,
+                                slot_index: idx,
+                                error: err,
+                            })
+                            .await;
                     }
                     Ok(Err(panic_err)) => {
-                        let _ = tx_clone.send(AppEvent::VariantFailed {
-                            photo_id: photo_id_clone,
-                            slot_index: idx,
-                            error: format!("Thread error: {}", panic_err),
-                        }).await;
+                        let _ = tx_clone
+                            .send(AppEvent::VariantFailed {
+                                photo_id: photo_id_clone,
+                                slot_index: idx,
+                                error: format!("Thread error: {}", panic_err),
+                            })
+                            .await;
                     }
                     Err(_) => {
-                        let _ = tx_clone.send(AppEvent::VariantFailed {
-                            photo_id: photo_id_clone,
-                            slot_index: idx,
-                            error: "Tiempo de espera agotado (>10s)".into(),
-                        }).await;
+                        let _ = tx_clone
+                            .send(AppEvent::VariantFailed {
+                                photo_id: photo_id_clone,
+                                slot_index: idx,
+                                error: "Tiempo de espera agotado (>10s)".into(),
+                            })
+                            .await;
                     }
                 }
             });
@@ -281,7 +311,9 @@ impl AppController {
                     self.needs_render = true;
                 }
             }
-            AppEvent::PreviewReady { photo_id, image, .. } => {
+            AppEvent::PreviewReady {
+                photo_id, image, ..
+            } => {
                 if let Some(item) = self.items.get(self.selected_index) {
                     if item.filename == photo_id {
                         self.mode_a.update_image(image);
@@ -289,7 +321,11 @@ impl AppController {
                 }
                 self.needs_render = true;
             }
-            AppEvent::VariantReady { photo_id, slot_index, image } => {
+            AppEvent::VariantReady {
+                photo_id,
+                slot_index,
+                image,
+            } => {
                 if let Some(item) = self.items.get(self.selected_index) {
                     if item.filename == photo_id {
                         if let Some(slot) = self.mode_a.variants.get_mut(slot_index) {
@@ -300,7 +336,11 @@ impl AppController {
                 }
                 self.needs_render = true;
             }
-            AppEvent::VariantFailed { photo_id, slot_index, error } => {
+            AppEvent::VariantFailed {
+                photo_id,
+                slot_index,
+                error,
+            } => {
                 if let Some(item) = self.items.get(self.selected_index) {
                     if item.filename == photo_id {
                         if let Some(slot) = self.mode_a.variants.get_mut(slot_index) {
@@ -310,13 +350,28 @@ impl AppController {
                 }
                 self.needs_render = true;
             }
-            AppEvent::BatchProgress { completed, total, current_file, percent } => {
+            AppEvent::BatchProgress {
+                completed,
+                total,
+                current_file,
+                percent,
+            } => {
                 self.mode_b.completed_count = completed;
                 self.mode_b.total_jobs = total;
-                if let Some(ref mut queue_item) = self.mode_b.queue.iter_mut().find(|j| j.status == crate::tui::mode_b::BatchJobStatus::Queued) {
-                    queue_item.status = crate::tui::mode_b::BatchJobStatus::Processing { progress_pct: percent as u8 };
+                if let Some(ref mut queue_item) = self
+                    .mode_b
+                    .queue
+                    .iter_mut()
+                    .find(|j| j.status == crate::tui::mode_b::BatchJobStatus::Queued)
+                {
+                    queue_item.status = crate::tui::mode_b::BatchJobStatus::Processing {
+                        progress_pct: percent as u8,
+                    };
                 }
-                self.status_message = format!("Batch: {} ({:.1}%) - [{}/{}]", current_file, percent, completed, total);
+                self.status_message = format!(
+                    "Batch: {} ({:.1}%) - [{}/{}]",
+                    current_file, percent, completed, total
+                );
                 self.needs_render = true;
             }
             AppEvent::StatusMessage(msg) => {
@@ -339,6 +394,12 @@ impl AppController {
     pub async fn handle_key(&mut self, key: KeyEvent) -> Result<(), AppError> {
         // Discard key release events (prevent double triggers on Windows console)
         if key.kind == KeyEventKind::Release {
+            return Ok(());
+        }
+
+        // Active interactive top wizard flow
+        if self.flow_state.is_active {
+            self.handle_flow_key(key).await?;
             return Ok(());
         }
 
@@ -459,14 +520,19 @@ impl AppController {
                     self.status_message = format!(
                         "Foto {} {}",
                         item.filename,
-                        if is_sel { "marcada para lote [x]" } else { "desmarcada [ ]" }
+                        if is_sel {
+                            "marcada para lote [x]"
+                        } else {
+                            "desmarcada [ ]"
+                        }
                     );
                 }
             }
 
             // Photo navigation from PreviewCanvas (Hero and SplitView)
             KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h')
-                if self.focused_pane == PaneId::PreviewCanvas && self.mode_a.view_mode != ModeAView::VariantMatrix =>
+                if self.focused_pane == PaneId::PreviewCanvas
+                    && self.mode_a.view_mode != ModeAView::VariantMatrix =>
             {
                 if !self.items.is_empty() {
                     if self.selected_index > 0 {
@@ -478,7 +544,8 @@ impl AppController {
                 }
             }
             KeyCode::Down | KeyCode::Right | KeyCode::Char('j') | KeyCode::Char('l')
-                if self.focused_pane == PaneId::PreviewCanvas && self.mode_a.view_mode != ModeAView::VariantMatrix =>
+                if self.focused_pane == PaneId::PreviewCanvas
+                    && self.mode_a.view_mode != ModeAView::VariantMatrix =>
             {
                 if !self.items.is_empty() {
                     if self.selected_index < self.items.len() - 1 {
@@ -515,7 +582,9 @@ impl AppController {
                 self.status_message = "Mode A: 6-Variant Matrix".into();
                 self.trigger_variant_previews();
             }
-            KeyCode::Char('s') | KeyCode::Char('S') if self.focused_pane == PaneId::PreviewCanvas => {
+            KeyCode::Char('s') | KeyCode::Char('S')
+                if self.focused_pane == PaneId::PreviewCanvas =>
+            {
                 self.mode_a.view_mode = match self.mode_a.view_mode {
                     ModeAView::SplitView => ModeAView::Hero,
                     _ => ModeAView::SplitView,
@@ -533,21 +602,30 @@ impl AppController {
             }
 
             // Variant grid navigation (Horizontal & Vertical)
-            KeyCode::Left | KeyCode::Char('h') if self.mode_a.view_mode == ModeAView::VariantMatrix && self.focused_pane == PaneId::PreviewCanvas => {
+            KeyCode::Left | KeyCode::Char('h')
+                if self.mode_a.view_mode == ModeAView::VariantMatrix
+                    && self.focused_pane == PaneId::PreviewCanvas =>
+            {
                 if self.mode_a.focused_variant > 0 {
                     self.mode_a.focused_variant -= 1;
                 } else if self.mode_a.variant_count > 0 {
                     self.mode_a.focused_variant = self.mode_a.variant_count - 1;
                 }
             }
-            KeyCode::Right | KeyCode::Char('l') if self.mode_a.view_mode == ModeAView::VariantMatrix && self.focused_pane == PaneId::PreviewCanvas => {
+            KeyCode::Right | KeyCode::Char('l')
+                if self.mode_a.view_mode == ModeAView::VariantMatrix
+                    && self.focused_pane == PaneId::PreviewCanvas =>
+            {
                 if self.mode_a.focused_variant + 1 < self.mode_a.variant_count {
                     self.mode_a.focused_variant += 1;
                 } else {
                     self.mode_a.focused_variant = 0;
                 }
             }
-            KeyCode::Up | KeyCode::Char('k') if self.mode_a.view_mode == ModeAView::VariantMatrix && self.focused_pane == PaneId::PreviewCanvas => {
+            KeyCode::Up | KeyCode::Char('k')
+                if self.mode_a.view_mode == ModeAView::VariantMatrix
+                    && self.focused_pane == PaneId::PreviewCanvas =>
+            {
                 let cols = match self.mode_a.variant_count {
                     2 => 2,
                     3 => 3,
@@ -558,7 +636,10 @@ impl AppController {
                     self.mode_a.focused_variant -= cols;
                 }
             }
-            KeyCode::Down | KeyCode::Char('j') if self.mode_a.view_mode == ModeAView::VariantMatrix && self.focused_pane == PaneId::PreviewCanvas => {
+            KeyCode::Down | KeyCode::Char('j')
+                if self.mode_a.view_mode == ModeAView::VariantMatrix
+                    && self.focused_pane == PaneId::PreviewCanvas =>
+            {
                 let cols = match self.mode_a.variant_count {
                     2 => 2,
                     3 => 3,
@@ -569,27 +650,44 @@ impl AppController {
                     self.mode_a.focused_variant += cols;
                 }
             }
-            KeyCode::Enter if self.mode_a.view_mode == ModeAView::VariantMatrix && self.focused_pane == PaneId::PreviewCanvas => {
+            KeyCode::Enter
+                if self.mode_a.view_mode == ModeAView::VariantMatrix
+                    && self.focused_pane == PaneId::PreviewCanvas =>
+            {
                 self.mode_a.promote_focused_variant();
-                self.status_message = format!("Promoted variant to active recipe: {}", self.mode_a.active_recipe.name);
+                self.status_message = format!(
+                    "Promoted variant to active recipe: {}",
+                    self.mode_a.active_recipe.name
+                );
             }
 
             // Multi-selection (Space) & Favorite tagging (F) in PreviewCanvas
             KeyCode::Char(' ') if self.focused_pane == PaneId::PreviewCanvas => {
                 if self.mode_a.view_mode == ModeAView::VariantMatrix {
                     self.mode_a.toggle_selection();
-                    let is_sel = self.mode_a.variants.get(self.mode_a.focused_variant).map(|s| s.is_selected).unwrap_or(false);
+                    let is_sel = self
+                        .mode_a
+                        .variants
+                        .get(self.mode_a.focused_variant)
+                        .map(|s| s.is_selected)
+                        .unwrap_or(false);
                     self.status_message = format!(
                         "Variante {} {}",
                         self.mode_a.focused_variant + 1,
-                        if is_sel { "marcada para lote [X]" } else { "desmarcada" }
+                        if is_sel {
+                            "marcada para lote [X]"
+                        } else {
+                            "desmarcada"
+                        }
                     );
                 } else {
                     self.mode_a.toggle_favorite();
                     self.status_message = "Toggled favorite on active variant".into();
                 }
             }
-            KeyCode::Char('f') | KeyCode::Char('F') if self.focused_pane == PaneId::PreviewCanvas => {
+            KeyCode::Char('f') | KeyCode::Char('F')
+                if self.focused_pane == PaneId::PreviewCanvas =>
+            {
                 self.mode_a.toggle_favorite();
                 self.status_message = "Toggled favorite (★) on active variant".into();
             }
@@ -618,30 +716,45 @@ impl AppController {
                 self.status_message = "Cleared flag (UNFLAGGED)".into();
             }
             KeyCode::Char('e') | KeyCode::Char('E') => {
-                if self.focused_pane == PaneId::PreviewCanvas && self.mode_a.view_mode == ModeAView::VariantMatrix {
+                if self.focused_pane == PaneId::PreviewCanvas
+                    && self.mode_a.view_mode == ModeAView::VariantMatrix
+                {
                     let targets = self.mode_a.get_selected_or_focused_indices();
-                    self.export_prompt = true;
-                    self.status_message = format!(
-                        "Exportación: {} variante(s) seleccionada(s): [1] Solo TIFF | [2] Solo JPEG | [3] Ambos (TIFF + JPEG) | [Esc] Cancelar",
-                        targets.len()
-                    );
+                    self.flow_state.start_with_variants(targets);
+                    self.status_message =
+                        "Asistente: Paso 3/5 - Selecciona proporciones de imagen en la cabecera superior".into();
+                    self.needs_render = true;
                 } else if let Some(item) = self.items.get(self.selected_index) {
                     let source_path = item.path.clone();
                     let file_name = item.filename.clone();
-                    let (recipe, target_label) = if self.mode_a.view_mode == ModeAView::VariantMatrix {
+                    let (recipe, target_label) = if self.mode_a.view_mode
+                        == ModeAView::VariantMatrix
+                    {
                         if let Some(slot) = self.mode_a.variants.get(self.mode_a.focused_variant) {
-                            (slot.recipe.clone(), format!("Variante {} ({})", slot.index + 1, slot.recipe.name))
+                            (
+                                slot.recipe.clone(),
+                                format!("Variante {} ({})", slot.index + 1, slot.recipe.name),
+                            )
                         } else {
-                            (self.mode_a.active_recipe.clone(), self.mode_a.active_recipe.name.clone())
+                            (
+                                self.mode_a.active_recipe.clone(),
+                                self.mode_a.active_recipe.name.clone(),
+                            )
                         }
                     } else {
-                        (self.mode_a.active_recipe.clone(), self.mode_a.active_recipe.name.clone())
+                        (
+                            self.mode_a.active_recipe.clone(),
+                            self.mode_a.active_recipe.name.clone(),
+                        )
                     };
 
                     let preset_name = recipe.name.clone();
                     let output_dir = PathBuf::from("export").join("interactive");
-                    
-                    self.status_message = format!("Exportando {} [{}] en máxima calidad...", file_name, target_label);
+
+                    self.status_message = format!(
+                        "Exportando {} [{}] en máxima calidad...",
+                        file_name, target_label
+                    );
                     self.needs_render = true;
 
                     let pipeline = crate::export::ExportPipeline::new();
@@ -692,8 +805,14 @@ impl AppController {
                     let res_jpeg = pipeline.execute_export(None, &jpeg_job).await;
 
                     match (res_tiff, res_jpeg) {
-                        (Ok(crate::export::ExportOutcome::Success { bytes_written: b1, .. }),
-                         Ok(crate::export::ExportOutcome::Success { bytes_written: b2, .. })) => {
+                        (
+                            Ok(crate::export::ExportOutcome::Success {
+                                bytes_written: b1, ..
+                            }),
+                            Ok(crate::export::ExportOutcome::Success {
+                                bytes_written: b2, ..
+                            }),
+                        ) => {
                             self.status_message = format!(
                                 "Guardado OK: {} [{}] (TIFF 16b: {:.1}MB, JPEG 100%: {:.1}MB)",
                                 file_name,
@@ -703,10 +822,16 @@ impl AppController {
                             );
                         }
                         (Err(e), _) | (_, Err(e)) => {
-                            self.status_message = format!("Error al exportar {} [{}]: {}", file_name, target_label, e);
+                            self.status_message = format!(
+                                "Error al exportar {} [{}]: {}",
+                                file_name, target_label, e
+                            );
                         }
                         _ => {
-                            self.status_message = format!("Exportación completada con avisos para {} [{}]", file_name, target_label);
+                            self.status_message = format!(
+                                "Exportación completada con avisos para {} [{}]",
+                                file_name, target_label
+                            );
                         }
                     }
                 }
@@ -714,12 +839,16 @@ impl AppController {
 
             // Recipe intensity adjustments
             KeyCode::Char('[') => {
-                self.mode_a.active_intensity = (self.mode_a.active_intensity - 0.05).clamp(0.0, 1.5);
-                self.status_message = format!("Intensity: {:.0}%", self.mode_a.active_intensity * 100.0);
+                self.mode_a.active_intensity =
+                    (self.mode_a.active_intensity - 0.05).clamp(0.0, 1.5);
+                self.status_message =
+                    format!("Intensity: {:.0}%", self.mode_a.active_intensity * 100.0);
             }
             KeyCode::Char(']') => {
-                self.mode_a.active_intensity = (self.mode_a.active_intensity + 0.05).clamp(0.0, 1.5);
-                self.status_message = format!("Intensity: {:.0}%", self.mode_a.active_intensity * 100.0);
+                self.mode_a.active_intensity =
+                    (self.mode_a.active_intensity + 0.05).clamp(0.0, 1.5);
+                self.status_message =
+                    format!("Intensity: {:.0}%", self.mode_a.active_intensity * 100.0);
             }
             _ => {}
         }
@@ -773,7 +902,11 @@ impl AppController {
             self.mode_a.metadata = read_native_metadata(&item.path);
             if let Some(ref mut photo) = self.mode_a.active_photo {
                 photo.file_name = item.filename.clone();
-                photo.format = if item.is_cr3 { "cr3".into() } else { "image".into() };
+                photo.format = if item.is_cr3 {
+                    "cr3".into()
+                } else {
+                    "image".into()
+                };
                 photo.width = self.mode_a.metadata.width;
                 photo.height = self.mode_a.metadata.height;
                 photo.camera = self.mode_a.metadata.camera_model.clone();
@@ -819,7 +952,10 @@ impl AppController {
             let (recipe, preset_name) = if let Some(slot) = self.mode_a.variants.get(slot_idx) {
                 (slot.recipe.clone(), slot.recipe.name.clone())
             } else {
-                (self.mode_a.active_recipe.clone(), self.mode_a.active_recipe.name.clone())
+                (
+                    self.mode_a.active_recipe.clone(),
+                    self.mode_a.active_recipe.name.clone(),
+                )
             };
 
             let variant_tag = format!("var{}_{}", slot_idx + 1, preset_name.replace(' ', "_"));
@@ -880,9 +1016,235 @@ impl AppController {
         self.mode_a.clear_selection();
         self.status_message = format!(
             "Exportación completada. Guardado OK: {} variante(s) exportadas en {}",
-            success_count,
-            format_label
+            success_count, format_label
         );
+        self.needs_render = true;
+        Ok(())
+    }
+
+    /// Execute batch export using the configured InteractiveFlowState matrix (US-006 & US-007).
+    pub async fn execute_flow_export_batch(&mut self) -> Result<(), AppError> {
+        let Some(item) = self.items.get(self.selected_index) else {
+            self.status_message = "No hay foto seleccionada para exportar".into();
+            self.flow_state.close();
+            return Ok(());
+        };
+
+        let source_path = item.path.clone();
+        let file_name = item.filename.clone();
+        let target_variants = if self.flow_state.selected_variants.is_empty() {
+            self.mode_a.get_selected_or_focused_indices()
+        } else {
+            self.flow_state.selected_variants.clone()
+        };
+        let target_ratios = if self.flow_state.selected_ratios.is_empty() {
+            vec![AspectRatio::Original]
+        } else {
+            self.flow_state.selected_ratios.clone()
+        };
+        let target_formats = if self.flow_state.selected_formats.is_empty() {
+            vec![crate::export::OutputFormat::Tiff]
+        } else {
+            self.flow_state.selected_formats.clone()
+        };
+
+        let output_dir = PathBuf::from("export").join("interactive");
+        let pipeline = crate::export::ExportPipeline::new();
+
+        self.status_message = format!(
+            "Exportando matriz: {} variante(s) × {} proporción(es) × {} formato(s) para {}...",
+            target_variants.len(),
+            target_ratios.len(),
+            target_formats.len(),
+            file_name
+        );
+        self.needs_render = true;
+
+        let mut success_count = 0usize;
+        let mut job_seq = 1usize;
+
+        for &slot_idx in &target_variants {
+            let (recipe, preset_name) = if let Some(slot) = self.mode_a.variants.get(slot_idx) {
+                (slot.recipe.clone(), slot.recipe.name.clone())
+            } else {
+                (
+                    self.mode_a.active_recipe.clone(),
+                    self.mode_a.active_recipe.name.clone(),
+                )
+            };
+
+            for &ratio in &target_ratios {
+                for &format in &target_formats {
+                    let aspect_tag = ratio.aspect_label();
+                    let variant_tag = format!(
+                        "var{}_{}__{}",
+                        slot_idx + 1,
+                        preset_name.replace(' ', "_"),
+                        aspect_tag
+                    );
+
+                    let (bit_depth, quality) = match format {
+                        crate::export::OutputFormat::Tiff => {
+                            (crate::export::BitDepth::Sixteen, 100)
+                        }
+                        crate::export::OutputFormat::Png => (crate::export::BitDepth::Eight, 100),
+                        crate::export::OutputFormat::Jpeg => (crate::export::BitDepth::Eight, 95),
+                    };
+
+                    let job = crate::export::ExportJob {
+                        job_id: job_seq as u64,
+                        source_path: source_path.clone(),
+                        photo_id: None,
+                        recipe_name: variant_tag.clone(),
+                        recipe: recipe.clone(),
+                        profile: crate::export::ExportProfile {
+                            name: format!("{}_{:?}", variant_tag, format),
+                            format,
+                            quality,
+                            bit_depth,
+                            scaling: crate::export::ScalingProfile::AspectCrop { ratio },
+                            ..Default::default()
+                        },
+                        output_dir: output_dir.clone(),
+                        template: crate::export::NamingTemplate::parse("{name}__{preset}.{ext}"),
+                        seq_number: job_seq,
+                        collision_policy: crate::export::CollisionPolicy::Overwrite,
+                    };
+                    job_seq += 1;
+                    if let Ok(crate::export::ExportOutcome::Success { .. }) =
+                        pipeline.execute_export(None, &job).await
+                    {
+                        success_count += 1;
+                    }
+                }
+            }
+        }
+
+        self.flow_state.close();
+        self.mode_a.clear_selection();
+        self.status_message = format!(
+            "Exportación completada. Guardado OK: {} archivo(s) generados en export/interactive/",
+            success_count
+        );
+        self.needs_render = true;
+        Ok(())
+    }
+
+    /// Process keyboard inputs when the top interactive wizard flow is active.
+    pub async fn handle_flow_key(&mut self, key: KeyEvent) -> Result<(), AppError> {
+        match self.flow_state.step {
+            WizardStep::Variants => match key.code {
+                KeyCode::Esc => {
+                    self.flow_state.close();
+                    self.status_message = "Asistente cancelado.".into();
+                }
+                KeyCode::Enter => {
+                    if !self.flow_state.selected_variants.is_empty() {
+                        self.flow_state.step = WizardStep::AspectRatios;
+                    } else {
+                        let targets = self.mode_a.get_selected_or_focused_indices();
+                        self.flow_state.start_with_variants(targets);
+                        self.flow_state.step = WizardStep::AspectRatios;
+                    }
+                }
+                _ => {}
+            },
+            WizardStep::AspectRatios => match key.code {
+                KeyCode::Char('1') => self.flow_state.toggle_ratio(AspectRatio::Square1x1),
+                KeyCode::Char('2') => self.flow_state.toggle_ratio(AspectRatio::Photo3x2),
+                KeyCode::Char('3') => self.flow_state.toggle_ratio(AspectRatio::Classic4x3),
+                KeyCode::Char('4') => self.flow_state.toggle_ratio(AspectRatio::Widescreen16x9),
+                KeyCode::Char('5') => self.flow_state.toggle_ratio(AspectRatio::Social4x5),
+                KeyCode::Char('6') => self.flow_state.toggle_ratio(AspectRatio::Original),
+                KeyCode::Char('a') | KeyCode::Char('A') => {
+                    self.flow_state.selected_ratios = AspectRatio::ALL.to_vec();
+                }
+                KeyCode::Enter => {
+                    if !self.flow_state.selected_ratios.is_empty() {
+                        self.flow_state.step = WizardStep::FileFormats;
+                    } else {
+                        self.status_message =
+                            "Selecciona al menos una proporción antes de continuar".into();
+                    }
+                }
+                KeyCode::Char('b') | KeyCode::Char('B') | KeyCode::Esc => {
+                    self.flow_state.close();
+                    self.status_message = "Regresado al panel de variantes (Paso 2)".into();
+                }
+                _ => {}
+            },
+            WizardStep::FileFormats => match key.code {
+                KeyCode::Char('1') => {
+                    self.flow_state.selected_formats = vec![crate::export::OutputFormat::Tiff];
+                }
+                KeyCode::Char('2') => {
+                    self.flow_state.selected_formats = vec![crate::export::OutputFormat::Jpeg];
+                }
+                KeyCode::Char('3') => {
+                    self.flow_state.selected_formats = vec![crate::export::OutputFormat::Png];
+                }
+                KeyCode::Char('4') => {
+                    self.flow_state.selected_formats = vec![
+                        crate::export::OutputFormat::Tiff,
+                        crate::export::OutputFormat::Jpeg,
+                    ];
+                }
+                KeyCode::Char('5') => {
+                    self.flow_state.selected_formats = vec![
+                        crate::export::OutputFormat::Tiff,
+                        crate::export::OutputFormat::Jpeg,
+                        crate::export::OutputFormat::Png,
+                    ];
+                }
+                KeyCode::Enter => {
+                    if !self.flow_state.selected_formats.is_empty() {
+                        self.flow_state.step = WizardStep::Summary;
+                    }
+                }
+                KeyCode::Char('b') | KeyCode::Char('B') => {
+                    self.flow_state.step = WizardStep::AspectRatios;
+                }
+                KeyCode::Esc => {
+                    self.flow_state.close();
+                    self.status_message = "Asistente cancelado.".into();
+                }
+                _ => {}
+            },
+            WizardStep::Summary => match key.code {
+                KeyCode::Char('1') | KeyCode::Enter => {
+                    self.execute_flow_export_batch().await?;
+                }
+                KeyCode::Char('2') => {
+                    self.flow_state.close();
+                    self.status_message =
+                        "Modificando variantes en Panel 2. Pulsa [E] para reanudar el asistente."
+                            .into();
+                }
+                KeyCode::Char('3') => {
+                    self.flow_state.step = WizardStep::AspectRatios;
+                }
+                KeyCode::Char('4') => {
+                    self.flow_state.step = WizardStep::FileFormats;
+                }
+                KeyCode::Char('p') | KeyCode::Char('P') => {
+                    self.flow_state.step = WizardStep::SavePreset;
+                }
+                KeyCode::Char('5') | KeyCode::Esc => {
+                    self.flow_state.close();
+                    self.status_message = "Exportación cancelada.".into();
+                }
+                _ => {}
+            },
+            WizardStep::SavePreset => match key.code {
+                KeyCode::Enter | KeyCode::Char('b') | KeyCode::Char('B') | KeyCode::Esc => {
+                    self.flow_state.step = WizardStep::Summary;
+                    self.status_message =
+                        "Configuración registrada como preset. Pulsa [1/Enter] para exportar."
+                            .into();
+                }
+                _ => {}
+            },
+        }
         self.needs_render = true;
         Ok(())
     }
@@ -894,14 +1256,14 @@ impl AppController {
     /// Top-level Ratatui render pass.
     pub fn render(&self, frame: &mut Frame) {
         let area = frame.area();
-        let layout = AppLayout::compute(area);
+        let layout = AppLayout::compute_with_flow(area, self.flow_state.is_active);
 
         if layout.is_too_small {
             self.render_too_small_overlay(frame, area);
             return;
         }
 
-        // 1. Render Header
+        // 1. Render Header (or Top Wizard Banner if flow active)
         self.render_header(frame, layout.header_area);
 
         // 2. Render Library Explorer Pane
@@ -924,42 +1286,264 @@ impl AppController {
                 area.width, area.height, AppLayout::MIN_WIDTH, AppLayout::MIN_HEIGHT
             )
         } else {
-            format!("MIN: {}x{}\nACT: {}x{}", AppLayout::MIN_WIDTH, AppLayout::MIN_HEIGHT, area.width, area.height)
+            format!(
+                "MIN: {}x{}\nACT: {}x{}",
+                AppLayout::MIN_WIDTH,
+                AppLayout::MIN_HEIGHT,
+                area.width,
+                area.height
+            )
         };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Red))
             .title(" Alerta ");
-        let p = Paragraph::new(msg).block(block).alignment(Alignment::Center);
+        let p = Paragraph::new(msg)
+            .block(block)
+            .alignment(Alignment::Center);
         frame.render_widget(p, area);
     }
 
     fn render_header(&self, frame: &mut Frame, area: Rect) {
+        if self.flow_state.is_active {
+            self.render_top_wizard_banner(frame, area);
+            return;
+        }
+
         let mode_tag = match self.mode {
             AppMode::SinglePhoto => Span::styled(
                 " [F10] Mode A: Single Photo ",
-                Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
             ),
             AppMode::BatchQueue => Span::styled(
                 " [F10] Mode B: Batch Queue ",
-                Style::default().fg(Color::Black).bg(Color::Magenta).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
             ),
         };
 
         let title = Span::styled(
             " LightCraft TUI v0.1.0 ",
-            Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
         );
         let mcp_badge = Span::styled(" [MCP: Connected] ", Style::default().fg(Color::Green));
 
-        let line = Line::from(vec![title, Span::raw(" | "), mode_tag, Span::raw(" | "), mcp_badge]);
+        let line = Line::from(vec![
+            title,
+            Span::raw(" | "),
+            mode_tag,
+            Span::raw(" | "),
+            mcp_badge,
+        ]);
         let p = Paragraph::new(line);
         frame.render_widget(p, area);
     }
 
+    fn render_top_wizard_banner(&self, frame: &mut Frame, area: Rect) {
+        let step_title = match self.flow_state.step {
+            WizardStep::Variants => "Paso 2/5: Variantes de Procesamiento",
+            WizardStep::AspectRatios => "Paso 3/5: Proporciones de Imagen (Aspect Ratio)",
+            WizardStep::FileFormats => "Paso 4/5: Formatos de Archivo de Salida",
+            WizardStep::Summary => "Paso 5/5: Resumen y Confirmación de Exportación",
+            WizardStep::SavePreset => "Guardar Configuración como Preset",
+        };
+
+        let step3_style = if self.flow_state.step == WizardStep::AspectRatios {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Yellow)
+        };
+        let step4_style = if self.flow_state.step == WizardStep::FileFormats {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Cyan)
+        };
+        let step5_style = if self.flow_state.step == WizardStep::Summary
+            || self.flow_state.step == WizardStep::SavePreset
+        {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Green)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Green)
+        };
+
+        let breadcrumb_line = Line::from(vec![
+            Span::styled(
+                " [ASISTENTE] ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" [1. Fotos] ❯ [2. Variantes] ❯ "),
+            Span::styled(" [3. Proporciones] ", step3_style),
+            Span::raw(" ❯ "),
+            Span::styled(" [4. Formatos] ", step4_style),
+            Span::raw(" ❯ "),
+            Span::styled(" [5. Resumen] ", step5_style),
+        ]);
+
+        let (info_line, help_line) = match self.flow_state.step {
+            WizardStep::Variants => (
+                Line::from(vec![Span::styled(
+                    format!(
+                        " Variantes seleccionadas: {} ",
+                        self.flow_state.selected_variants.len()
+                    ),
+                    Style::default().fg(Color::White),
+                )]),
+                Line::from(vec![Span::styled(
+                    " [Space] Seleccionar variante | [Enter] Continuar a Proporciones | [Esc] Cancelar ",
+                    Style::default().fg(Color::Yellow),
+                )]),
+            ),
+            WizardStep::AspectRatios => {
+                let ratios_str = self
+                    .flow_state
+                    .selected_ratios
+                    .iter()
+                    .map(|r| r.aspect_label())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                (
+                    Line::from(vec![
+                        Span::styled(
+                            " Proporciones: ",
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            " [1] 1:1  [2] 3:2  [3] 4:3  [4] 16:9  [5] 4:5  [6] Original  [A] Todos ",
+                            Style::default().fg(Color::Cyan),
+                        ),
+                        Span::styled(
+                            format!(" | Activas: [{}] ", ratios_str),
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]),
+                    Line::from(vec![Span::styled(
+                        " [1..6/A] Alternar selección | [Enter] Continuar a Formatos | [B] Volver a Variantes | [Esc] Cancelar ",
+                        Style::default().fg(Color::Yellow),
+                    )]),
+                )
+            }
+            WizardStep::FileFormats => {
+                let fmt_str = self
+                    .flow_state
+                    .selected_formats
+                    .iter()
+                    .map(|f| f.default_extension().to_uppercase())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                (
+                    Line::from(vec![
+                        Span::styled(
+                            " Formatos de salida: ",
+                            Style::default()
+                                .fg(Color::White)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            " [1] Solo TIFF (16b)  [2] Solo JPEG  [3] Solo PNG  [4] TIFF+JPEG  [5] Todos ",
+                            Style::default().fg(Color::Cyan),
+                        ),
+                        Span::styled(
+                            format!(" | Activos: [{}] ", fmt_str),
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                    ]),
+                    Line::from(vec![Span::styled(
+                        " [1..5] Elegir formatos | [Enter] Continuar al Resumen | [B] Volver a Proporciones | [Esc] Cancelar ",
+                        Style::default().fg(Color::Yellow),
+                    )]),
+                )
+            }
+            WizardStep::Summary => {
+                let photos = 1;
+                let variants = self.flow_state.selected_variants.len().max(1);
+                let ratios = self.flow_state.selected_ratios.len().max(1);
+                let formats = self.flow_state.selected_formats.len().max(1);
+                let plan = JobPlan::new(photos, variants, ratios, formats);
+                (
+                    Line::from(vec![
+                        Span::styled(
+                            format!(
+                                " TOTAL ESTIMADO: {} foto(s) × {} variante(s) × {} proporción(es) × {} formato(s) = {} ARCHIVOS ",
+                                plan.photos_count, plan.variants_count, plan.ratios_count, plan.formats_count, plan.total_output_files()
+                            ),
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(
+                            " | Destino: export/interactive/ ",
+                            Style::default().fg(Color::White),
+                        ),
+                    ]),
+                    Line::from(vec![Span::styled(
+                        " [1/Enter] INICIAR EXPORTACIÓN | [2] Modificar Variantes | [3] Modificar Proporciones | [4] Modificar Formatos | [P] Guardar Preset | [Esc] Cancelar ",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    )]),
+                )
+            }
+            WizardStep::SavePreset => (
+                Line::from(vec![Span::styled(
+                    " CONFIGURACIÓN REGISTRADA COMO PRESET DE EXPORTACIÓN ",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                )]),
+                Line::from(vec![Span::styled(
+                    " [Enter/B] Volver al Resumen ",
+                    Style::default().fg(Color::Yellow),
+                )]),
+            ),
+        };
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .title(format!(" ❯ {} ❮ ", step_title));
+
+        let paragraph = Paragraph::new(vec![breadcrumb_line, info_line, help_line])
+            .block(block)
+            .wrap(Wrap { trim: false });
+        frame.render_widget(paragraph, area);
+    }
+
     fn render_library(&self, frame: &mut Frame, area: Rect, layout: &AppLayout) {
         let is_pane_focused = self.focused_pane == PaneId::Library;
-        let block = layout.block_for(PaneId::Library, self.focused_pane, "1. BIBLIOTECA (Archivos RAW/Imágenes)");
+        let block = layout.block_for(
+            PaneId::Library,
+            self.focused_pane,
+            "1. BIBLIOTECA (Archivos RAW/Imágenes)",
+        );
         let inner = block.inner(area);
         let max_visible = inner.height as usize;
 
@@ -975,23 +1559,45 @@ impl AppController {
             .iter()
             .enumerate()
             .skip(scroll_offset)
-            .take(if max_visible > 0 { max_visible } else { self.items.len() })
+            .take(if max_visible > 0 {
+                max_visible
+            } else {
+                self.items.len()
+            })
             .map(|(idx, item)| {
                 let is_selected = idx == self.selected_index;
                 let prefix = if is_selected { "► " } else { "  " };
                 let flag = if item.is_selected { "[x] " } else { "[ ] " };
                 let raw_badge = if item.is_cr3 { " [CR3]" } else { " [IMG]" };
-                let star_badge = if item.rating > 0 { format!(" {}★", item.rating) } else { "".into() };
-                let pick_badge = if item.is_picked { " [P]" } else if item.is_rejected { " [X]" } else { "" };
+                let star_badge = if item.rating > 0 {
+                    format!(" {}★", item.rating)
+                } else {
+                    "".into()
+                };
+                let pick_badge = if item.is_picked {
+                    " [P]"
+                } else if item.is_rejected {
+                    " [X]"
+                } else {
+                    ""
+                };
 
                 let style = if is_selected && is_pane_focused {
-                    Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD)
                 } else if is_selected {
-                    Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(Color::White)
                 };
-                ListItem::new(format!("{}{}{}{}{}{}", prefix, flag, item.filename, raw_badge, star_badge, pick_badge)).style(style)
+                ListItem::new(format!(
+                    "{}{}{}{}{}{}",
+                    prefix, flag, item.filename, raw_badge, star_badge, pick_badge
+                ))
+                .style(style)
             })
             .collect();
 
@@ -1002,7 +1608,9 @@ impl AppController {
     fn render_center(&self, frame: &mut Frame, area: Rect) {
         let is_focused = self.focused_pane == PaneId::PreviewCanvas;
         match self.mode {
-            AppMode::SinglePhoto => render_mode_a(frame, area, &self.mode_a, &self.graphics, is_focused),
+            AppMode::SinglePhoto => {
+                render_mode_a(frame, area, &self.mode_a, &self.graphics, is_focused)
+            }
             AppMode::BatchQueue => render_mode_b(frame, area, &self.mode_b, is_focused),
         }
     }
@@ -1017,11 +1625,17 @@ impl AppController {
             let p = Paragraph::new(Line::from(vec![
                 Span::styled(
                     " [EXPORTAR FORMATO] ",
-                    Style::default().fg(Color::Black).bg(Color::Rgb(255, 165, 0)).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(Color::Rgb(255, 165, 0))
+                        .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
                     prompt_text,
-                    Style::default().fg(Color::White).bg(Color::DarkGray).add_modifier(Modifier::BOLD),
+                    Style::default()
+                        .fg(Color::White)
+                        .bg(Color::DarkGray)
+                        .add_modifier(Modifier::BOLD),
                 ),
             ]));
             frame.render_widget(p, area);
@@ -1033,17 +1647,52 @@ impl AppController {
             PaneId::PreviewCanvas => "Panel Activo: [2. PREVISUALIZADOR]",
             PaneId::QueueStatus => "Panel Activo: [COLA/ESTADO]",
         };
-        let selected_count = format!("Foto {}/{} ", self.selected_index + 1, self.items.len().max(1));
-        let left_part = Span::styled(selected_count, Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD));
-        let pane_badge = Span::styled(format!(" {} ", active_pane_str), Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD));
-        let right_part = Span::styled(format!(" {} ", self.status_message), Style::default().fg(Color::White).bg(Color::DarkGray));
+        let selected_count = format!(
+            "Foto {}/{} ",
+            self.selected_index + 1,
+            self.items.len().max(1)
+        );
+        let left_part = Span::styled(
+            selected_count,
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
+        let pane_badge = Span::styled(
+            format!(" {} ", active_pane_str),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+        let right_part = Span::styled(
+            format!(" {} ", self.status_message),
+            Style::default().fg(Color::White).bg(Color::DarkGray),
+        );
 
         // Variant progress badge if in VariantMatrix view
         let variant_badge = if self.mode_a.view_mode == ModeAView::VariantMatrix {
-            let ready_count = self.mode_a.variants.iter().take(self.mode_a.variant_count).filter(|v| matches!(v.status, crate::tui::mode_a::VariantRenderStatus::Ready)).count();
+            let ready_count = self
+                .mode_a
+                .variants
+                .iter()
+                .take(self.mode_a.variant_count)
+                .filter(|v| matches!(v.status, crate::tui::mode_a::VariantRenderStatus::Ready))
+                .count();
             let total = self.mode_a.variant_count;
-            let sel_count = self.mode_a.variants.iter().take(total).filter(|v| v.is_selected).count();
-            let sel_str = if sel_count > 0 { format!(" [Sel: {}]", sel_count) } else { String::new() };
+            let sel_count = self
+                .mode_a
+                .variants
+                .iter()
+                .take(total)
+                .filter(|v| v.is_selected)
+                .count();
+            let sel_str = if sel_count > 0 {
+                format!(" [Sel: {}]", sel_count)
+            } else {
+                String::new()
+            };
             format!(" [Var: {}/{}{}]", ready_count, total, sel_str)
         } else {
             String::new()

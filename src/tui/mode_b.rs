@@ -1,22 +1,32 @@
 //! Mode B: Batch Queue Scaffold & Telemetry Viewer (Milestone M3 UI Contract).
 //! Prepared for Milestone M4 async worker pool integration.
 
-use std::path::PathBuf;
-use std::time::{Duration, Instant};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, BorderType, Borders, Cell, Gauge, Paragraph, Row, Table};
 use ratatui::Frame;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
 
 /// Status of an individual batch processing job.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BatchJobStatus {
     Queued,
-    Processing { progress_pct: u8 },
-    Done { output_path: PathBuf, bytes_written: u64, elapsed: Duration },
-    Failed { error_message: String },
+    Processing {
+        progress_pct: u8,
+    },
+    Done {
+        output_path: PathBuf,
+        bytes_written: u64,
+        elapsed: Duration,
+    },
+    Failed {
+        error_message: String,
+    },
     Cancelled,
-    Skipped { reason: String },
+    Skipped {
+        reason: String,
+    },
 }
 
 /// A single item in the batch queue table.
@@ -89,13 +99,20 @@ impl ModeBState {
     pub fn cancel(&mut self) {
         self.is_running = false;
         for job in &mut self.queue {
-            if matches!(job.status, BatchJobStatus::Queued | BatchJobStatus::Processing { .. }) {
+            if matches!(
+                job.status,
+                BatchJobStatus::Queued | BatchJobStatus::Processing { .. }
+            ) {
                 job.status = BatchJobStatus::Cancelled;
             }
         }
     }
 
-    pub fn update_from_telemetry(&mut self, telemetry: &crate::queue::worker::BatchTelemetry, _current_file: &str) {
+    pub fn update_from_telemetry(
+        &mut self,
+        telemetry: &crate::queue::worker::BatchTelemetry,
+        _current_file: &str,
+    ) {
         self.completed_count = telemetry.completed_count;
         self.failed_count = telemetry.failed_count;
         self.throughput_imgs_per_sec = telemetry.throughput_imgs_per_sec;
@@ -135,10 +152,14 @@ impl ModeBState {
                 status: match &j.status {
                     crate::queue::job::BatchJobStatus::Queued => BatchJobStatus::Queued,
                     crate::queue::job::BatchJobStatus::Developing { progress_pct } => {
-                        BatchJobStatus::Processing { progress_pct: *progress_pct }
+                        BatchJobStatus::Processing {
+                            progress_pct: *progress_pct,
+                        }
                     }
                     crate::queue::job::BatchJobStatus::Rendering { progress_pct } => {
-                        BatchJobStatus::Processing { progress_pct: *progress_pct }
+                        BatchJobStatus::Processing {
+                            progress_pct: *progress_pct,
+                        }
                     }
                     crate::queue::job::BatchJobStatus::Written { output_path, .. } => {
                         BatchJobStatus::Done {
@@ -179,8 +200,16 @@ impl ModeBState {
 pub fn render_mode_b(frame: &mut Frame, area: Rect, state: &ModeBState, is_focused: bool) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(if is_focused { BorderType::Thick } else { BorderType::Rounded })
-        .border_style(if is_focused { Style::default().fg(Color::Magenta) } else { Style::default().fg(Color::DarkGray) })
+        .border_type(if is_focused {
+            BorderType::Thick
+        } else {
+            BorderType::Rounded
+        })
+        .border_style(if is_focused {
+            Style::default().fg(Color::Magenta)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        })
         .title(" ❯ Mode B: Batch Queue Controller (M4 Async Scaffold) ");
 
     let inner = block.inner(area);
@@ -216,10 +245,18 @@ pub fn render_mode_b(frame: &mut Frame, area: Rect, state: &ModeBState, is_focus
     // 2. Active Job Status Card
     let active_desc = if state.is_paused {
         "BATCH QUEUE PAUSED. Press [Space] to resume."
-    } else if let Some(active) = state.queue.iter().find(|j| matches!(j.status, BatchJobStatus::Processing { .. })) {
+    } else if let Some(active) = state
+        .queue
+        .iter()
+        .find(|j| matches!(j.status, BatchJobStatus::Processing { .. }))
+    {
         &format!(
             "PROCESSING: {} -> {} ({})",
-            active.source_path.file_name().unwrap_or_default().to_string_lossy(),
+            active
+                .source_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy(),
             active.recipe_name,
             active.export_profile
         )
@@ -228,14 +265,31 @@ pub fn render_mode_b(frame: &mut Frame, area: Rect, state: &ModeBState, is_focus
     };
 
     let active_card = Paragraph::new(format!("  ► {}", active_desc))
-        .style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD))
+        .style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
         .block(Block::default().borders(Borders::BOTTOM));
     frame.render_widget(active_card, chunks[1]);
 
     // 3. Queue Table
-    let header_cells = ["#", "Source File", "Recipe Variant", "Export Profile", "Status", "Elapsed"]
-        .iter()
-        .map(|h| Cell::from(*h).style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)));
+    let header_cells = [
+        "#",
+        "Source File",
+        "Recipe Variant",
+        "Export Profile",
+        "Status",
+        "Elapsed",
+    ]
+    .iter()
+    .map(|h| {
+        Cell::from(*h).style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+    });
     let header = Row::new(header_cells).height(1);
 
     let rows: Vec<Row> = state
@@ -245,18 +299,41 @@ pub fn render_mode_b(frame: &mut Frame, area: Rect, state: &ModeBState, is_focus
         .map(|(idx, job)| {
             let is_selected = idx == state.selected_table_row;
             let (status_str, status_style) = match &job.status {
-                BatchJobStatus::Queued => ("Queued".to_string(), Style::default().fg(Color::DarkGray)),
-                BatchJobStatus::Processing { progress_pct } => (format!("Running ({}%)", progress_pct), Style::default().fg(Color::Yellow)),
-                BatchJobStatus::Done { elapsed, .. } => (format!("Done ({:.2}s)", elapsed.as_secs_f32()), Style::default().fg(Color::Green)),
-                BatchJobStatus::Failed { error_message } => (format!("Failed: {}", error_message), Style::default().fg(Color::Red)),
-                BatchJobStatus::Cancelled => ("Cancelled".to_string(), Style::default().fg(Color::DarkGray)),
-                BatchJobStatus::Skipped { reason } => (format!("Skipped: {}", reason), Style::default().fg(Color::Blue)),
+                BatchJobStatus::Queued => {
+                    ("Queued".to_string(), Style::default().fg(Color::DarkGray))
+                }
+                BatchJobStatus::Processing { progress_pct } => (
+                    format!("Running ({}%)", progress_pct),
+                    Style::default().fg(Color::Yellow),
+                ),
+                BatchJobStatus::Done { elapsed, .. } => (
+                    format!("Done ({:.2}s)", elapsed.as_secs_f32()),
+                    Style::default().fg(Color::Green),
+                ),
+                BatchJobStatus::Failed { error_message } => (
+                    format!("Failed: {}", error_message),
+                    Style::default().fg(Color::Red),
+                ),
+                BatchJobStatus::Cancelled => (
+                    "Cancelled".to_string(),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                BatchJobStatus::Skipped { reason } => (
+                    format!("Skipped: {}", reason),
+                    Style::default().fg(Color::Blue),
+                ),
             };
 
             let prefix = if is_selected { "► " } else { "  " };
             let cells = vec![
                 Cell::from(format!("{}{}", prefix, job.id)),
-                Cell::from(job.source_path.file_name().unwrap_or_default().to_string_lossy().to_string()),
+                Cell::from(
+                    job.source_path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string(),
+                ),
                 Cell::from(job.recipe_name.clone()),
                 Cell::from(job.export_profile.clone()),
                 Cell::from(status_str).style(status_style),
@@ -264,7 +341,9 @@ pub fn render_mode_b(frame: &mut Frame, area: Rect, state: &ModeBState, is_focus
             ];
 
             let row_style = if is_selected {
-                Style::default().bg(Color::Rgb(30, 30, 45)).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .bg(Color::Rgb(30, 30, 45))
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default()
             };

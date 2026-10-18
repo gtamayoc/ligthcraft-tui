@@ -1,8 +1,8 @@
 //! Terminal graphic protocols auto-detection, fallback, and CLI configuration.
 
+use ratatui_image::picker::{Picker, ProtocolType};
 use std::env;
 use std::fmt;
-use ratatui_image::picker::{Picker, ProtocolType};
 
 /// Graphic protocol selection override.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

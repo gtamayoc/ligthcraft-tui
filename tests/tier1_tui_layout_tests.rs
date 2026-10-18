@@ -5,11 +5,11 @@
 //! - F-TUI-02: Dual Operating Modes (A: Single Photo vs B: Batch Queue) with State Retention
 //! - F-RNF-01: 60 FPS Async Event Loop & Responsive Geometry
 
-use std::path::PathBuf;
-use std::sync::Arc;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use ratatui::Terminal;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 use lightcraft_tui::app::{AppController, AppMode};
 use lightcraft_tui::graphics::protocol::ProtocolOverride;
@@ -28,7 +28,10 @@ fn test_t1_tui01_01_standard_desktop_layout_120x40() {
     let area = Rect::new(0, 0, 120, 40);
     let layout = AppLayout::compute(area);
 
-    assert!(!layout.is_too_small, "120x40 must satisfy minimum dimensions");
+    assert!(
+        !layout.is_too_small,
+        "120x40 must satisfy minimum dimensions"
+    );
     assert_eq!(layout.total_area, area);
 
     // Verify vertical division: Header, Middle, Status
@@ -38,8 +41,14 @@ fn test_t1_tui01_01_standard_desktop_layout_120x40() {
     assert_eq!(layout.status_area.y, 37);
 
     // Verify 2-column middle section: Library, Canvas
-    assert!(layout.library_area.width > 20, "Library must have adequate width");
-    assert!(layout.preview_area.width > 50, "Preview canvas must be the primary central region");
+    assert!(
+        layout.library_area.width > 20,
+        "Library must have adequate width"
+    );
+    assert!(
+        layout.preview_area.width > 50,
+        "Preview canvas must be the primary central region"
+    );
 
     // All horizontal widths must sum exactly to terminal width
     let total_width = layout.library_area.width + layout.preview_area.width;
@@ -68,9 +77,9 @@ fn test_t1_tui01_02_ultrawide_layout_200x50() {
 fn test_t1_tui01_03_subminimum_terminal_alert_overlay() {
     // Test terminal smaller than MIN_WIDTH x MIN_HEIGHT requirement
     let small_areas = [
-        Rect::new(0, 0, AppLayout::MIN_WIDTH - 1, 40),  // Too narrow
+        Rect::new(0, 0, AppLayout::MIN_WIDTH - 1, 40), // Too narrow
         Rect::new(0, 0, 120, AppLayout::MIN_HEIGHT - 1), // Too short
-        Rect::new(0, 0, 40, 10),  // Extremely tiny
+        Rect::new(0, 0, 40, 10),                       // Extremely tiny
         Rect::new(0, 0, 10, 5),
     ];
 
@@ -88,7 +97,10 @@ fn test_t1_tui01_03_subminimum_terminal_alert_overlay() {
     // Boundary check at exactly minimum threshold
     let exact_min = Rect::new(0, 0, AppLayout::MIN_WIDTH, AppLayout::MIN_HEIGHT);
     let layout_exact = AppLayout::compute(exact_min);
-    assert!(!layout_exact.is_too_small, "Minimum dimensions must be accepted");
+    assert!(
+        !layout_exact.is_too_small,
+        "Minimum dimensions must be accepted"
+    );
     assert!(layout_exact.preview_area.width > 0);
 }
 
@@ -116,15 +128,24 @@ fn test_t1_tui01_05_mouse_hit_testing_panes() {
 
     // Hit test inside Library pane
     let lib_point = (layout.library_area.x + 5, layout.library_area.y + 5);
-    assert_eq!(layout.pane_at(lib_point.0, lib_point.1), Some(PaneId::Library));
+    assert_eq!(
+        layout.pane_at(lib_point.0, lib_point.1),
+        Some(PaneId::Library)
+    );
 
     // Hit test inside Preview Canvas pane
     let canvas_point = (layout.preview_area.x + 10, layout.preview_area.y + 10);
-    assert_eq!(layout.pane_at(canvas_point.0, canvas_point.1), Some(PaneId::PreviewCanvas));
+    assert_eq!(
+        layout.pane_at(canvas_point.0, canvas_point.1),
+        Some(PaneId::PreviewCanvas)
+    );
 
     // Hit test inside Status Bar
     let status_point = (layout.status_area.x + 10, layout.status_area.y + 1);
-    assert_eq!(layout.pane_at(status_point.0, status_point.1), Some(PaneId::QueueStatus));
+    assert_eq!(
+        layout.pane_at(status_point.0, status_point.1),
+        Some(PaneId::QueueStatus)
+    );
 
     // Hit test out of bounds
     assert_eq!(layout.pane_at(250, 100), None);
@@ -138,16 +159,28 @@ fn test_t1_tui01_05_mouse_hit_testing_panes() {
 async fn test_t1_tui02_01_default_launch_state_is_mode_a() {
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(app.mode, AppMode::SinglePhoto);
     assert_eq!(app.focused_pane, PaneId::Library);
     assert_eq!(app.mode_a.view_mode, ModeAView::Hero);
     assert_eq!(app.selected_index, 0);
-    if PathBuf::from("DRAW").exists() && std::fs::read_dir("DRAW").map(|mut it| it.next().is_some()).unwrap_or(false) {
-        assert!(!app.items.is_empty(), "Items should be discovered from DRAW directory");
+    if PathBuf::from("DRAW").exists()
+        && std::fs::read_dir("DRAW")
+            .map(|mut it| it.next().is_some())
+            .unwrap_or(false)
+    {
+        assert!(
+            !app.items.is_empty(),
+            "Items should be discovered from DRAW directory"
+        );
     }
 }
 
@@ -155,9 +188,14 @@ async fn test_t1_tui02_01_default_launch_state_is_mode_a() {
 async fn test_t1_tui02_02_mode_toggle_preserves_state_and_edits() {
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     // 1. In Mode A, select photo index 2 and adjust intensity to 125%
     if app.items.len() >= 3 {
@@ -201,9 +239,14 @@ async fn test_t1_tui02_02_mode_toggle_preserves_state_and_edits() {
 async fn test_t1_tui02_03_mode_b_queue_pause_resume_cancel() {
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     app.mode = AppMode::BatchQueue;
     app.mode_b.is_running = true;
@@ -245,9 +288,14 @@ async fn test_t1_tui02_03_mode_b_queue_pause_resume_cancel() {
 async fn test_t1_tui02_04_ratatui_test_backend_full_render() {
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -260,11 +308,7 @@ async fn test_t1_tui02_04_ratatui_test_backend_full_render() {
     assert_eq!(buffer.area.height, 40);
 
     // Check for title content in rendered buffer
-    let content: String = buffer
-        .content()
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
+    let content: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
 
     assert!(content.contains("LightCraft TUI"));
     assert!(content.contains("Mode A"));
@@ -275,13 +319,18 @@ async fn test_t1_tui02_04_ratatui_test_backend_full_render() {
 
 #[tokio::test]
 async fn test_key_release_events_ignored_preventing_double_trigger() {
-    use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState, KeyCode, KeyModifiers};
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     let initial_pane = app.focused_pane;
     let initial_mode = app.mode;
@@ -294,7 +343,10 @@ async fn test_key_release_events_ignored_preventing_double_trigger() {
         state: KeyEventState::empty(),
     };
     app.handle_key(release_tab).await.unwrap();
-    assert_eq!(app.focused_pane, initial_pane, "Release event must be ignored");
+    assert_eq!(
+        app.focused_pane, initial_pane,
+        "Release event must be ignored"
+    );
 
     // Simulate Press event of Tab -> should advance exactly 1 pane
     let press_tab = KeyEvent {
@@ -304,7 +356,11 @@ async fn test_key_release_events_ignored_preventing_double_trigger() {
         state: KeyEventState::empty(),
     };
     app.handle_key(press_tab).await.unwrap();
-    assert_eq!(app.focused_pane, initial_pane.next(), "Press event advances 1 pane");
+    assert_eq!(
+        app.focused_pane,
+        initial_pane.next(),
+        "Press event advances 1 pane"
+    );
 
     // Simulate Release of F10 -> should be ignored
     let release_f10 = KeyEvent {
@@ -314,7 +370,10 @@ async fn test_key_release_events_ignored_preventing_double_trigger() {
         state: KeyEventState::empty(),
     };
     app.handle_key(release_f10).await.unwrap();
-    assert_eq!(app.mode, initial_mode, "Release of F10 must not switch mode");
+    assert_eq!(
+        app.mode, initial_mode,
+        "Release of F10 must not switch mode"
+    );
 
     // Simulate Press of F10 -> switches mode
     let press_f10 = KeyEvent {
@@ -333,9 +392,14 @@ async fn test_mouse_focus_bounds_stabilized() {
 
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     app.terminal_size = Rect::new(0, 0, 120, 30);
     let layout = AppLayout::compute(app.terminal_size);
@@ -375,18 +439,27 @@ async fn test_mouse_focus_bounds_stabilized() {
     }))
     .await
     .unwrap();
-    assert_eq!(app.focused_pane, PaneId::PreviewCanvas, "Header click must not alter focused pane");
+    assert_eq!(
+        app.focused_pane,
+        PaneId::PreviewCanvas,
+        "Header click must not alter focused pane"
+    );
 }
 
 #[tokio::test]
 async fn test_key_e_immediate_sequential_dual_export() {
-    use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState, KeyCode, KeyModifiers};
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     // Trigger key 'e' on selected photo
     let key_e = KeyEvent {
@@ -400,7 +473,9 @@ async fn test_key_e_immediate_sequential_dual_export() {
     // Verify status message indicates immediate save when photo exists, or clean prompt when DRAW is empty
     if !app.items.is_empty() {
         assert!(
-            app.status_message.contains("Guardado OK") || app.status_message.contains("Guardado inmediato OK") || app.status_message.contains("Exportación"),
+            app.status_message.contains("Guardado OK")
+                || app.status_message.contains("Guardado inmediato OK")
+                || app.status_message.contains("Exportación"),
             "Status message should report immediate export status: {}",
             app.status_message
         );
@@ -412,7 +487,10 @@ async fn test_key_e_immediate_sequential_dual_export() {
                 .unwrap()
                 .flatten()
                 .collect();
-            assert!(!entries.is_empty(), "Interactive export must create output files immediately");
+            assert!(
+                !entries.is_empty(),
+                "Interactive export must create output files immediately"
+            );
         }
     } else {
         // In clean CI environment without RAW assets
@@ -428,9 +506,14 @@ async fn test_key_e_immediate_sequential_dual_export() {
 async fn test_resize_event_unconditionally_triggers_force_clear_and_needs_render() {
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     app.terminal_size = Rect::new(0, 0, 120, 30);
     app.force_clear = false;
@@ -441,20 +524,28 @@ async fn test_resize_event_unconditionally_triggers_force_clear_and_needs_render
         .await
         .unwrap();
 
-    assert!(app.force_clear, "Resizing between valid sizes MUST unconditionally set force_clear");
+    assert!(
+        app.force_clear,
+        "Resizing between valid sizes MUST unconditionally set force_clear"
+    );
     assert!(app.needs_render, "Resizing must set needs_render");
     assert_eq!(app.terminal_size, Rect::new(0, 0, 200, 50));
 }
 
 #[tokio::test]
 async fn test_screen_refresh_shortcuts_f5_r_ctrl_l() {
-    use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState, KeyCode, KeyModifiers};
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     // 1. Test F5
     app.force_clear = false;
@@ -463,7 +554,9 @@ async fn test_screen_refresh_shortcuts_f5_r_ctrl_l() {
         modifiers: KeyModifiers::empty(),
         kind: KeyEventKind::Press,
         state: KeyEventState::empty(),
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     assert!(app.force_clear, "F5 must set force_clear to true");
     assert!(app.status_message.contains("F5"));
 
@@ -474,7 +567,9 @@ async fn test_screen_refresh_shortcuts_f5_r_ctrl_l() {
         modifiers: KeyModifiers::empty(),
         kind: KeyEventKind::Press,
         state: KeyEventState::empty(),
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     assert!(app.force_clear, "Key 'r' must set force_clear to true");
     assert!(app.status_message.to_lowercase().contains("restablecid"));
 
@@ -485,19 +580,26 @@ async fn test_screen_refresh_shortcuts_f5_r_ctrl_l() {
         modifiers: KeyModifiers::CONTROL,
         kind: KeyEventKind::Press,
         state: KeyEventState::empty(),
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     assert!(app.force_clear, "Ctrl+L must set force_clear to true");
 }
 
 #[tokio::test]
 async fn test_arrow_keys_navigation_and_wrapping_in_library_and_canvas() {
-    use crossterm::event::{KeyEvent, KeyEventKind, KeyEventState, KeyCode, KeyModifiers};
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
 
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     if app.items.len() >= 2 {
         app.selected_index = 0;
@@ -509,8 +611,14 @@ async fn test_arrow_keys_navigation_and_wrapping_in_library_and_canvas() {
             modifiers: KeyModifiers::empty(),
             kind: KeyEventKind::Press,
             state: KeyEventState::empty(),
-        }).await.unwrap();
-        assert_eq!(app.selected_index, app.items.len() - 1, "Up arrow at index 0 should wrap to last item");
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            app.selected_index,
+            app.items.len() - 1,
+            "Up arrow at index 0 should wrap to last item"
+        );
 
         // Down on last item should wrap to first item
         app.handle_key(KeyEvent {
@@ -518,8 +626,13 @@ async fn test_arrow_keys_navigation_and_wrapping_in_library_and_canvas() {
             modifiers: KeyModifiers::empty(),
             kind: KeyEventKind::Press,
             state: KeyEventState::empty(),
-        }).await.unwrap();
-        assert_eq!(app.selected_index, 0, "Down arrow at end should wrap to first item");
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            app.selected_index, 0,
+            "Down arrow at end should wrap to first item"
+        );
 
         // Left arrow should navigate to previous item (wrapping to end)
         app.handle_key(KeyEvent {
@@ -527,8 +640,14 @@ async fn test_arrow_keys_navigation_and_wrapping_in_library_and_canvas() {
             modifiers: KeyModifiers::empty(),
             kind: KeyEventKind::Press,
             state: KeyEventState::empty(),
-        }).await.unwrap();
-        assert_eq!(app.selected_index, app.items.len() - 1, "Left arrow should navigate backward");
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            app.selected_index,
+            app.items.len() - 1,
+            "Left arrow should navigate backward"
+        );
 
         // Right arrow should navigate forward (wrapping to 0)
         app.handle_key(KeyEvent {
@@ -536,7 +655,9 @@ async fn test_arrow_keys_navigation_and_wrapping_in_library_and_canvas() {
             modifiers: KeyModifiers::empty(),
             kind: KeyEventKind::Press,
             state: KeyEventState::empty(),
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
         assert_eq!(app.selected_index, 0, "Right arrow should navigate forward");
 
         // Focus on PreviewCanvas in Hero view -> arrows should also navigate photos
@@ -548,10 +669,12 @@ async fn test_arrow_keys_navigation_and_wrapping_in_library_and_canvas() {
             modifiers: KeyModifiers::empty(),
             kind: KeyEventKind::Press,
             state: KeyEventState::empty(),
-        }).await.unwrap();
-        assert_eq!(app.selected_index, 1, "Right arrow in PreviewCanvas should advance photo");
+        })
+        .await
+        .unwrap();
+        assert_eq!(
+            app.selected_index, 1,
+            "Right arrow in PreviewCanvas should advance photo"
+        );
     }
 }
-
-
-

@@ -1,12 +1,12 @@
 //! Mode A: Single Photo Inspector, Variant Grid, Split-View Comparison, and 1:1 Loupe Zoom.
 
-use std::sync::Arc;
-use std::time::Instant;
 use image::{DynamicImage, GenericImage, GenericImageView, Rgba};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
+use std::sync::Arc;
+use std::time::Instant;
 
 use crate::engine::presets::BuiltinPreset;
 use crate::engine::recipe::Recipe;
@@ -244,7 +244,10 @@ pub fn composite_wiper(
     after: &DynamicImage,
     split_ratio: f32,
 ) -> DynamicImage {
-    let (w, h) = (before.width().min(after.width()), before.height().min(after.height()));
+    let (w, h) = (
+        before.width().min(after.width()),
+        before.height().min(after.height()),
+    );
     if w == 0 || h == 0 {
         return after.clone();
     }
@@ -450,7 +453,8 @@ impl ModeAState {
 
     /// Return indices of all selected variants, or fallback to the focused variant if none is selected.
     pub fn get_selected_or_focused_indices(&self) -> Vec<usize> {
-        let selected: Vec<usize> = self.variants
+        let selected: Vec<usize> = self
+            .variants
             .iter()
             .take(self.variant_count)
             .filter(|s| s.is_selected)
@@ -489,8 +493,16 @@ pub fn render_mode_a(
 fn render_hero_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focused: bool) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(if is_focused { BorderType::Thick } else { BorderType::Rounded })
-        .border_style(if is_focused { Style::default().fg(Color::Cyan) } else { Style::default().fg(Color::DarkGray) })
+        .border_type(if is_focused {
+            BorderType::Thick
+        } else {
+            BorderType::Rounded
+        })
+        .border_style(if is_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        })
         .title(format!(
             " {}2. PREVISUALIZADOR: {} [{} | {}]{} ",
             if is_focused { "❯ [ACTIVO] " } else { "" },
@@ -514,7 +526,9 @@ fn render_hero_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focuse
         state.active_recipe.name,
         state.active_intensity * 100.0,
     );
-    let p = Paragraph::new(details).alignment(Alignment::Left).wrap(Wrap { trim: true });
+    let p = Paragraph::new(details)
+        .alignment(Alignment::Left)
+        .wrap(Wrap { trim: true });
     frame.render_widget(p, inner);
 }
 
@@ -570,9 +584,15 @@ fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_f
 
             let block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(if slot.is_selected || is_focused_slot { BorderType::Thick } else { BorderType::Rounded })
+                .border_type(if slot.is_selected || is_focused_slot {
+                    BorderType::Thick
+                } else {
+                    BorderType::Rounded
+                })
                 .border_style(if is_focused_slot && is_focused {
-                    Style::default().fg(border_color).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(border_color)
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(border_color)
                 })
@@ -581,7 +601,11 @@ fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_f
                     if is_focused_slot { "► " } else { "" },
                     sel_badge,
                     slot.index + 1,
-                    if !slot.label.is_empty() { format!(". {}", slot.label) } else { String::new() },
+                    if !slot.label.is_empty() {
+                        format!(". {}", slot.label)
+                    } else {
+                        String::new()
+                    },
                     (slot.intensity * 100.0) as u32,
                     fav_badge,
                     flag_badge
@@ -605,7 +629,9 @@ fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_f
                 "☆".repeat(5 - slot.rating as usize),
                 status_repr
             );
-            let p = Paragraph::new(text).alignment(Alignment::Center).wrap(Wrap { trim: true });
+            let p = Paragraph::new(text)
+                .alignment(Alignment::Center)
+                .wrap(Wrap { trim: true });
             frame.render_widget(p, inner);
         }
     }
@@ -614,9 +640,20 @@ fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_f
 fn render_split_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focused: bool) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_type(if is_focused { BorderType::Thick } else { BorderType::Rounded })
-        .border_style(if is_focused { Style::default().fg(Color::Cyan) } else { Style::default().fg(Color::DarkGray) })
-        .title(format!(" ❯ Split-View Comparison: Before vs After [{:?}] ", state.split_kind));
+        .border_type(if is_focused {
+            BorderType::Thick
+        } else {
+            BorderType::Rounded
+        })
+        .border_style(if is_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default().fg(Color::DarkGray)
+        })
+        .title(format!(
+            " ❯ Split-View Comparison: Before vs After [{:?}] ",
+            state.split_kind
+        ));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -628,11 +665,24 @@ fn render_split_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focus
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(inner);
 
-            let before_block = Block::default().borders(Borders::ALL).title(" Before (Original Baseline) ");
-            let after_block = Block::default().borders(Borders::ALL).title(format!(" After ({}) ", state.active_recipe.name));
+            let before_block = Block::default()
+                .borders(Borders::ALL)
+                .title(" Before (Original Baseline) ");
+            let after_block = Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" After ({}) ", state.active_recipe.name));
 
-            let p_before = Paragraph::new("\n[ Original Raw Image ]\nIntensity: 0%\nNeutral Balance").alignment(Alignment::Center).block(before_block);
-            let p_after = Paragraph::new(format!("\n[ Edited Variant ]\nIntensity: {:.0}%\nRecipe: {}", state.active_intensity * 100.0, state.active_recipe.name)).alignment(Alignment::Center).block(after_block);
+            let p_before =
+                Paragraph::new("\n[ Original Raw Image ]\nIntensity: 0%\nNeutral Balance")
+                    .alignment(Alignment::Center)
+                    .block(before_block);
+            let p_after = Paragraph::new(format!(
+                "\n[ Edited Variant ]\nIntensity: {:.0}%\nRecipe: {}",
+                state.active_intensity * 100.0,
+                state.active_recipe.name
+            ))
+            .alignment(Alignment::Center)
+            .block(after_block);
 
             frame.render_widget(p_before, halves[0]);
             frame.render_widget(p_after, halves[1]);
@@ -643,7 +693,8 @@ fn render_split_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focus
                 .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
                 .split(inner);
 
-            let p_before = Paragraph::new("[ Top: Before / Baseline ]").alignment(Alignment::Center);
+            let p_before =
+                Paragraph::new("[ Top: Before / Baseline ]").alignment(Alignment::Center);
             let p_after = Paragraph::new("[ Bottom: After / Recipe ]").alignment(Alignment::Center);
             frame.render_widget(p_before, halves[0]);
             frame.render_widget(p_after, halves[1]);
@@ -668,4 +719,3 @@ fn render_split_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focus
         }
     }
 }
-

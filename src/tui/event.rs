@@ -1,11 +1,11 @@
 //! Decoupled 60 FPS async event loop producer and stream dispatcher.
 //! Decouples the UI render loop from background image decompression and MCP worker threads.
 
-use std::sync::Arc;
-use std::time::Duration;
 use crossterm::event::{KeyEvent, MouseEvent};
 use futures::StreamExt;
 use image::DynamicImage;
+use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;

@@ -219,7 +219,10 @@ impl McpClient {
             match Self::spawn(config).await {
                 Ok(client) => return Ok(client),
                 Err(e) => {
-                    tracing::warn!("Failed to spawn live LightCraft daemon ({}), falling back to mock", e);
+                    tracing::warn!(
+                        "Failed to spawn live LightCraft daemon ({}), falling back to mock",
+                        e
+                    );
                 }
             }
         }
@@ -308,7 +311,10 @@ impl McpClient {
                                     if let Some(tx) = p.remove(&id) {
                                         let _ = tx.send(Ok(resp));
                                     } else {
-                                        tracing::warn!("Received response for untracked or timed-out ID: {}", id);
+                                        tracing::warn!(
+                                            "Received response for untracked or timed-out ID: {}",
+                                            id
+                                        );
                                     }
                                 }
                             }
@@ -316,10 +322,17 @@ impl McpClient {
                                 tracing::debug!("Received server notification: {}", notif.method);
                             }
                             Ok(JsonRpcMessage::Request(req)) => {
-                                tracing::warn!("Ignoring unexpected server-to-client request: {}", req.method);
+                                tracing::warn!(
+                                    "Ignoring unexpected server-to-client request: {}",
+                                    req.method
+                                );
                             }
                             Err(e) => {
-                                tracing::error!("Failed to parse incoming JSON-RPC line: {}. Raw: {}", e, trimmed);
+                                tracing::error!(
+                                    "Failed to parse incoming JSON-RPC line: {}. Raw: {}",
+                                    e,
+                                    trimmed
+                                );
                             }
                         }
                     }
@@ -439,7 +452,9 @@ impl McpClient {
                         let (_tx, rx) = mpsc::channel(256);
                         if client.spawn_process_loop(exe_path, rx).await.is_ok() {
                             if client.perform_handshake().await.is_ok() {
-                                tracing::info!("Successfully reconnected to LightCraft MCP server!");
+                                tracing::info!(
+                                    "Successfully reconnected to LightCraft MCP server!"
+                                );
                                 break;
                             }
                         }
@@ -756,7 +771,10 @@ impl McpClient {
     }
 
     /// Update develop settings or sliders.
-    pub async fn set_develop(&self, params: SetDevelopParams) -> Result<SetDevelopResult, McpError> {
+    pub async fn set_develop(
+        &self,
+        params: SetDevelopParams,
+    ) -> Result<SetDevelopResult, McpError> {
         self.call_tool("set_develop", params).await
     }
 
@@ -785,11 +803,10 @@ impl McpClient {
             name: name.map(String::from),
         };
         let raw: VirtualCopyRawResult = self.call_tool("cmd_photo_virtualCopy", params).await?;
-        raw.primary_id()
-            .ok_or_else(|| McpError::ToolError {
-                tool: "cmd_photo_virtualCopy".to_string(),
-                message: "No virtual copy ID returned".to_string(),
-            })
+        raw.primary_id().ok_or_else(|| McpError::ToolError {
+            tool: "cmd_photo_virtualCopy".to_string(),
+            message: "No virtual copy ID returned".to_string(),
+        })
     }
 
     /// Render a preview for display in terminal UI.
@@ -868,21 +885,26 @@ impl McpClient {
 
     /// Enumerate all available native presets.
     pub async fn list_presets(&self) -> Result<Vec<McpPresetInfo>, McpError> {
-        self.call_tool("cmd_presets_list", serde_json::json!({})).await
+        self.call_tool("cmd_presets_list", serde_json::json!({}))
+            .await
     }
 
     /// Enumerate all color profiles.
     pub async fn list_profiles(&self) -> Result<Vec<McpProfileInfo>, McpError> {
-        self.call_tool("cmd_profiles_list", serde_json::json!({})).await
+        self.call_tool("cmd_profiles_list", serde_json::json!({}))
+            .await
     }
 
     /// Enumerate all develop slider definitions.
     pub async fn list_controls(&self) -> Result<Vec<DevelopControlInfo>, McpError> {
-        let res: serde_json::Value = self.call_tool("list_controls", serde_json::json!({})).await?;
+        let res: serde_json::Value = self
+            .call_tool("list_controls", serde_json::json!({}))
+            .await?;
         if let Some(controls_array) = res.get("controls").and_then(|c| c.as_array()) {
             serde_json::from_value(serde_json::Value::Array(controls_array.clone()))
                 .map_err(McpError::from)
-        } else if let Ok(controls) = serde_json::from_value::<Vec<DevelopControlInfo>>(res.clone()) {
+        } else if let Ok(controls) = serde_json::from_value::<Vec<DevelopControlInfo>>(res.clone())
+        {
             Ok(controls)
         } else {
             Ok(Vec::new())
@@ -907,13 +929,18 @@ impl McpClient {
     // In-Memory Offline Mock Transport
     // ========================================================================
 
-    async fn start_mock_transport(&self, mut writer_rx: mpsc::Receiver<String>) -> Result<(), McpError> {
+    async fn start_mock_transport(
+        &self,
+        mut writer_rx: mpsc::Receiver<String>,
+    ) -> Result<(), McpError> {
         let pending = self.inner.pending.clone();
         let status = self.inner.status.clone();
 
         tokio::spawn(async move {
             while let Some(line) = writer_rx.recv().await {
-                if let Ok(JsonRpcMessage::Request(req)) = serde_json::from_str::<JsonRpcMessage>(&line) {
+                if let Ok(JsonRpcMessage::Request(req)) =
+                    serde_json::from_str::<JsonRpcMessage>(&line)
+                {
                     let req_id = match req.id {
                         JsonRpcId::Number(n) => n as u64,
                         _ => 0,
@@ -1095,7 +1122,7 @@ impl McpClient {
                                 _ => serde_json::json!({
                                     "isError": true,
                                     "content": [{ "type": "text", "text": format!("Unknown mock tool: {}", tool_name) }]
-                                })
+                                }),
                             };
 
                             JsonRpcResponse {

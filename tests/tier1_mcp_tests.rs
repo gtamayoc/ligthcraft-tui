@@ -41,7 +41,9 @@ fn test_mcp_01_handshake_lifecycle() {
     assert_eq!(resp.id, Some(json!(1)), "Response ID must match request ID");
     assert!(resp.error.is_none(), "Handshake must not return error");
 
-    let res = resp.result.expect("Expected result payload in handshake response");
+    let res = resp
+        .result
+        .expect("Expected result payload in handshake response");
     assert_eq!(
         res["protocolVersion"], "2024-11-05",
         "Protocol version must match LightCraft 2024-11-05"
@@ -86,10 +88,7 @@ fn test_mcp_02_tool_discovery_and_registration() {
     let result = resp.result.expect("Expected tools/list result");
     let tools = result["tools"].as_array().expect("Tools must be an array");
 
-    let tool_names: Vec<&str> = tools
-        .iter()
-        .filter_map(|t| t["name"].as_str())
-        .collect();
+    let tool_names: Vec<&str> = tools.iter().filter_map(|t| t["name"].as_str()).collect();
 
     // Assert all critical photographic tools are present
     let mandatory_tools = [
@@ -131,7 +130,9 @@ fn test_mcp_03_develop_controls_schema_validation() {
     let resp = server.handle_request(req);
     assert_eq!(resp.id, Some(json!(3)));
     let result = resp.result.expect("Expected list_controls result");
-    let controls = result["controls"].as_array().expect("Controls must be an array");
+    let controls = result["controls"]
+        .as_array()
+        .expect("Controls must be an array");
 
     // Verify Exposure control bounds
     let exposure = controls
@@ -187,10 +188,7 @@ fn test_mcp_04_native_presets_enumeration() {
         "Server must provide at least 5 built-in aesthetic presets"
     );
 
-    let preset_ids: Vec<&str> = presets
-        .iter()
-        .filter_map(|p| p["id"].as_str())
-        .collect();
+    let preset_ids: Vec<&str> = presets.iter().filter_map(|p| p["id"].as_str()).collect();
 
     assert!(preset_ids.contains(&"lc.crisp-landscape"));
     assert!(preset_ids.contains(&"lc.cinematic"));
@@ -200,7 +198,11 @@ fn test_mcp_04_native_presets_enumeration() {
 
     // Verify built-in flag on all native presets
     for p in &presets {
-        assert_eq!(p["builtin"], true, "Native preset {} must have builtin: true", p["id"]);
+        assert_eq!(
+            p["builtin"], true,
+            "Native preset {} must have builtin: true",
+            p["id"]
+        );
     }
 
     fixture.assert_integrity();
@@ -230,7 +232,10 @@ fn test_mcp_05_develop_immutability_and_state_isolation() {
         params: Some(json!({ "photoId": "p_0588" })),
     };
     let vc_resp = server.handle_request(vc_req);
-    let vc_id = vc_resp.result.unwrap()["virtualCopyId"].as_str().unwrap().to_string();
+    let vc_id = vc_resp.result.unwrap()["virtualCopyId"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // 3. Mutate virtual copy settings aggressively
     let set_vc_req = JsonRpcRequest {
@@ -301,7 +306,10 @@ fn test_mcp_06_export_schema_and_collision_policies() {
         })),
     };
     let err_resp = server.handle_request(invalid_export);
-    assert!(err_resp.error.is_some(), "Invalid conflict policy must be rejected");
+    assert!(
+        err_resp.error.is_some(),
+        "Invalid conflict policy must be rejected"
+    );
     assert_eq!(err_resp.error.unwrap().code, JsonRpcError::INVALID_PARAMS);
 
     fixture.assert_integrity();
@@ -342,10 +350,18 @@ fn test_mcp_07_adversarial_error_handling() {
 
 #[tokio::test]
 async fn test_mcp_08_client_async_connect_and_handshake() {
-    let client = McpClient::connect_mock().await.expect("Client mock connect failed");
-    assert!(client.is_alive().await, "Client must report alive after handshake");
+    let client = McpClient::connect_mock()
+        .await
+        .expect("Client mock connect failed");
+    assert!(
+        client.is_alive().await,
+        "Client must report alive after handshake"
+    );
 
-    let server_info = client.server_info().await.expect("ServerInfo must be present");
+    let server_info = client
+        .server_info()
+        .await
+        .expect("ServerInfo must be present");
     assert_eq!(server_info.name, "lightcraft");
     assert_eq!(server_info.version, "0.8.0");
 
@@ -362,7 +378,9 @@ async fn test_mcp_08_client_async_connect_and_handshake() {
 
 #[tokio::test]
 async fn test_mcp_09_client_import_and_catalog_query() {
-    let client = McpClient::connect_mock().await.expect("Client mock connect failed");
+    let client = McpClient::connect_mock()
+        .await
+        .expect("Client mock connect failed");
 
     // Test import
     let import_res = client
@@ -386,10 +404,15 @@ async fn test_mcp_09_client_import_and_catalog_query() {
 
 #[tokio::test]
 async fn test_mcp_10_client_develop_and_virtual_copy() {
-    let client = McpClient::connect_mock().await.expect("Client mock connect failed");
+    let client = McpClient::connect_mock()
+        .await
+        .expect("Client mock connect failed");
 
     // Test get_develop
-    let dev = client.get_develop(Some(1)).await.expect("get_develop failed");
+    let dev = client
+        .get_develop(Some(1))
+        .await
+        .expect("get_develop failed");
     assert_eq!(dev.treatment, "color");
     assert_eq!(dev.light.exposure, 0.0);
 
@@ -424,7 +447,9 @@ async fn test_mcp_10_client_develop_and_virtual_copy() {
 
 #[tokio::test]
 async fn test_mcp_11_client_render_preview_and_export() {
-    let client = McpClient::connect_mock().await.expect("Client mock connect failed");
+    let client = McpClient::connect_mock()
+        .await
+        .expect("Client mock connect failed");
 
     // Test render_preview
     let preview = client
@@ -434,7 +459,10 @@ async fn test_mcp_11_client_render_preview_and_export() {
     assert_eq!(preview.format, ImageFormat::Jpeg);
     assert!(!preview.data_base64.is_empty());
     let raw_bytes = preview.decode_bytes().expect("Base64 decode failed");
-    assert!(!raw_bytes.is_empty(), "Decoded image bytes must not be empty");
+    assert!(
+        !raw_bytes.is_empty(),
+        "Decoded image bytes must not be empty"
+    );
 
     // Test export
     let exp = client
@@ -461,11 +489,18 @@ fn test_mcp_12_integrity_engine_raw_immutability_guard() {
     let engine = IntegrityEngine::new(vec![draw_dir.clone()], true);
 
     // Pre-flight manifest capture
-    let manifest = engine.capture_preflight().expect("capture_preflight failed");
-    assert!(!manifest.records.is_empty(), "Manifest must capture present CR3 files");
+    let manifest = engine
+        .capture_preflight()
+        .expect("capture_preflight failed");
+    assert!(
+        !manifest.records.is_empty(),
+        "Manifest must capture present CR3 files"
+    );
 
     // Immutability verification
-    engine.verify_manifest(&manifest).expect("verify_manifest must pass");
+    engine
+        .verify_manifest(&manifest)
+        .expect("verify_manifest must pass");
 
     // Safe mode add passes
     assert!(engine.validate_import_mode(None).is_ok());
@@ -473,13 +508,16 @@ fn test_mcp_12_integrity_engine_raw_immutability_guard() {
 
     // Prohibited move mode rejected
     let engine_for_prohibited = IntegrityEngine::new(vec![draw_dir.clone()], true);
-    assert!(engine_for_prohibited.validate_import_mode(Some("move")).is_err());
+    assert!(engine_for_prohibited
+        .validate_import_mode(Some("move"))
+        .is_err());
     assert!(engine_for_prohibited.is_poisoned());
 
     // Prohibited export into DRAW rejected
     let engine_for_dest = IntegrityEngine::new(vec![draw_dir.clone()], true);
     let inside_draw = draw_dir.join("polluted_output.jpg");
-    assert!(engine_for_dest.validate_destination_path(&inside_draw).is_err());
+    assert!(engine_for_dest
+        .validate_destination_path(&inside_draw)
+        .is_err());
     assert!(engine_for_dest.is_poisoned());
 }
-

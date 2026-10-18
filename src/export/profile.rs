@@ -1,7 +1,7 @@
 //! Export profiles, format definitions, and dimension scaling engine (F-EXP-01, F-EXP-02).
 
-use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 
 use crate::export::collision::{CollisionPolicy, CollisionResolver};
 use crate::export::naming::{NamingContext, NamingTemplate};
@@ -81,15 +81,22 @@ pub enum ScalingProfile {
     },
 
     /// Percentage scaling (e.g. 50.0 for 50%, 100.0 for 100%).
-    Percentage {
-        percent: f32,
+    Percentage { percent: f32 },
+
+    /// Geometric center-crop to target photographic aspect ratio.
+    AspectCrop {
+        ratio: crate::export::aspect::AspectRatio,
     },
 }
 
 impl ScalingProfile {
     /// Computes the destination (width, height) given source dimensions.
     /// Preserves aspect ratio and prevents zero-dimension results.
-    pub fn compute_target_dimensions(&self, src_w: u32, src_h: u32) -> Result<(u32, u32), ExportError> {
+    pub fn compute_target_dimensions(
+        &self,
+        src_w: u32,
+        src_h: u32,
+    ) -> Result<(u32, u32), ExportError> {
         if src_w == 0 || src_h == 0 {
             return Err(ExportError::InvalidDimension {
                 width: src_w,
@@ -99,6 +106,11 @@ impl ScalingProfile {
 
         match *self {
             ScalingProfile::Native => Ok((src_w, src_h)),
+            ScalingProfile::AspectCrop { ratio } => {
+                let (_, _, cw, ch) =
+                    crate::export::aspect::calculate_center_crop(src_w, src_h, ratio);
+                Ok((cw, ch))
+            }
             ScalingProfile::FitToBounds {
                 max_width,
                 max_height,
@@ -160,8 +172,8 @@ impl ScalingProfile {
 pub struct ExportProfile {
     pub name: String,
     pub format: OutputFormat,
-    pub quality: u8,               // 1..=100 (for JPEG)
-    pub bit_depth: BitDepth,       // 8 or 16 (for PNG / TIFF)
+    pub quality: u8,         // 1..=100 (for JPEG)
+    pub bit_depth: BitDepth, // 8 or 16 (for PNG / TIFF)
     pub color_space: ColorSpace,
     pub scaling: ScalingProfile,
     pub tiff_compression: TiffCompression,
@@ -251,7 +263,9 @@ impl ExportProfile {
 
         match resolver.resolve_path(&output_dir, &file_stem, ext, collision)? {
             crate::export::collision::CollisionResolution::Write(p) => Ok(p),
-            crate::export::collision::CollisionResolution::Skip(p) => Err(ExportError::FileSkipped(p)),
+            crate::export::collision::CollisionResolution::Skip(p) => {
+                Err(ExportError::FileSkipped(p))
+            }
         }
     }
 }

@@ -74,8 +74,8 @@ impl Sha256 {
     pub fn new() -> Self {
         Self {
             state: [
-                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
-                0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+                0x5be0cd19,
             ],
             count: 0,
             buffer: [0u8; 64],
@@ -333,7 +333,8 @@ impl Cr3IntegrityGuard {
                 for entry in CR3_BASELINE {
                     let path = draw_dir.join(entry.filename);
                     if path.is_file() {
-                        let (hash, size) = compute_file_sha256(&path).expect("Failed reading present file");
+                        let (hash, size) =
+                            compute_file_sha256(&path).expect("Failed reading present file");
                         present.push(VerificationResult {
                             filename: entry.filename.to_string(),
                             actual_size: size,
@@ -401,14 +402,20 @@ mod tests {
         hasher.update(b"");
         let digest = hasher.finalize();
         let hex: String = digest.iter().map(|b| format!("{:02x}", b)).collect();
-        assert_eq!(hex, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(
+            hex,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
 
         // Test vector: "The quick brown fox jumps over the lazy dog"
         let mut hasher2 = Sha256::new();
         hasher2.update(b"The quick brown fox jumps over the lazy dog");
         let digest2 = hasher2.finalize();
         let hex2: String = digest2.iter().map(|b| format!("{:02x}", b)).collect();
-        assert_eq!(hex2, "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592");
+        assert_eq!(
+            hex2,
+            "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592"
+        );
     }
 
     #[test]
@@ -422,7 +429,11 @@ mod tests {
         match results {
             Ok(res_list) => {
                 for res in res_list {
-                    assert!(res.is_valid, "File {} failed baseline check: {:?}", res.filename, res.error_message);
+                    assert!(
+                        res.is_valid,
+                        "File {} failed baseline check: {:?}",
+                        res.filename, res.error_message
+                    );
                 }
             }
             Err(missing_err) => {
@@ -430,8 +441,13 @@ mod tests {
                 for entry in CR3_BASELINE {
                     let path = draw_dir.join(entry.filename);
                     if path.exists() {
-                        let (hash, size) = compute_file_sha256(&path).expect("Failed reading present file");
-                        assert_eq!(size, entry.expected_size, "Size mismatch for {}", entry.filename);
+                        let (hash, size) =
+                            compute_file_sha256(&path).expect("Failed reading present file");
+                        assert_eq!(
+                            size, entry.expected_size,
+                            "Size mismatch for {}",
+                            entry.filename
+                        );
                         assert!(
                             hash.eq_ignore_ascii_case(entry.expected_sha256),
                             "SHA-256 mismatch for {}",
@@ -441,7 +457,10 @@ mod tests {
                     }
                 }
                 if !checked_any {
-                    eprintln!("Notice: No sample CR3 files present in DRAW/ ({})", missing_err);
+                    eprintln!(
+                        "Notice: No sample CR3 files present in DRAW/ ({})",
+                        missing_err
+                    );
                 }
             }
         }

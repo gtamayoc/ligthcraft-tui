@@ -11,10 +11,10 @@
 
 mod common;
 
+use chrono::{TimeZone, Utc};
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use chrono::{TimeZone, Utc};
 use tempfile::tempdir;
 
 use lightcraft_tui::engine::presets::BuiltinPreset;
@@ -66,7 +66,13 @@ async fn test_t1_exp01_multi_format_encoding() {
     assert!(res.is_ok(), "JPEG export failed: {:?}", res.err());
 
     let outcome = res.unwrap();
-    if let ExportOutcome::Success { output_path, width, height, .. } = outcome {
+    if let ExportOutcome::Success {
+        output_path,
+        width,
+        height,
+        ..
+    } = outcome
+    {
         assert!(output_path.exists(), "Output file must exist on disk");
         assert_eq!(width, 800);
         assert_eq!(height, 533); // 3:2 aspect ratio preserved
@@ -109,7 +115,13 @@ async fn test_t1_exp01_multi_format_encoding() {
     let res = pipeline.execute_export(None, &png_job).await;
     assert!(res.is_ok(), "PNG export failed: {:?}", res.err());
 
-    if let ExportOutcome::Success { output_path, width, height, .. } = res.unwrap() {
+    if let ExportOutcome::Success {
+        output_path,
+        width,
+        height,
+        ..
+    } = res.unwrap()
+    {
         assert!(output_path.exists());
         assert_eq!(width, 600);
         assert_eq!(height, 400);
@@ -117,7 +129,10 @@ async fn test_t1_exp01_multi_format_encoding() {
         let bytes = std::fs::read(&output_path).expect("Failed to read PNG");
         // Check PNG magic bytes: 0x89 0x50 0x4E 0x47 0x0D 0x0A 0x1A 0x0A
         assert!(bytes.len() > 8);
-        assert_eq!(&bytes[0..8], &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+        assert_eq!(
+            &bytes[0..8],
+            &[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]
+        );
     } else {
         panic!("Expected ExportOutcome::Success");
     }
@@ -152,7 +167,13 @@ async fn test_t1_exp01_multi_format_encoding() {
     let res = pipeline.execute_export(None, &tiff_job).await;
     assert!(res.is_ok(), "TIFF export failed: {:?}", res.err());
 
-    if let ExportOutcome::Success { output_path, width, height, .. } = res.unwrap() {
+    if let ExportOutcome::Success {
+        output_path,
+        width,
+        height,
+        ..
+    } = res.unwrap()
+    {
         assert!(output_path.exists());
         assert_eq!(width, 300);
         assert_eq!(height, 200);
@@ -198,7 +219,10 @@ async fn test_t1_exp02_quality_scaling() {
         collision_policy: CollisionPolicy::Overwrite,
     };
 
-    let res_q50 = pipeline.execute_export(None, &job_q50).await.expect("Q50 export failed");
+    let res_q50 = pipeline
+        .execute_export(None, &job_q50)
+        .await
+        .expect("Q50 export failed");
     let path_q50 = match res_q50 {
         ExportOutcome::Success { output_path, .. } => output_path,
         _ => panic!("Expected success"),
@@ -230,7 +254,10 @@ async fn test_t1_exp02_quality_scaling() {
         collision_policy: CollisionPolicy::Overwrite,
     };
 
-    let res_q95 = pipeline.execute_export(None, &job_q95).await.expect("Q95 export failed");
+    let res_q95 = pipeline
+        .execute_export(None, &job_q95)
+        .await
+        .expect("Q95 export failed");
     let path_q95 = match res_q95 {
         ExportOutcome::Success { output_path, .. } => output_path,
         _ => panic!("Expected success"),
@@ -257,7 +284,10 @@ fn test_t1_exp03_dimension_scaling_profiles() {
 
     // 1. Native full resolution
     let native = ScalingProfile::Native;
-    assert_eq!(native.compute_target_dimensions(src_w, src_h).unwrap(), (6000, 4000));
+    assert_eq!(
+        native.compute_target_dimensions(src_w, src_h).unwrap(),
+        (6000, 4000)
+    );
 
     // 2. Long edge 2048px
     let long_edge = ScalingProfile::LongEdge {
@@ -280,7 +310,10 @@ fn test_t1_exp03_dimension_scaling_profiles() {
 
     // 4. Percentage 50%
     let pct = ScalingProfile::Percentage { percent: 50.0 };
-    assert_eq!(pct.compute_target_dimensions(src_w, src_h).unwrap(), (3000, 2000));
+    assert_eq!(
+        pct.compute_target_dimensions(src_w, src_h).unwrap(),
+        (3000, 2000)
+    );
 }
 
 #[test]
@@ -293,7 +326,9 @@ fn test_t1_exp04_dont_enlarge_guard() {
         dont_enlarge: true,
     };
     assert_eq!(
-        long_edge_guard.compute_target_dimensions(src_w, src_h).unwrap(),
+        long_edge_guard
+            .compute_target_dimensions(src_w, src_h)
+            .unwrap(),
         (6000, 4000)
     );
 
@@ -303,7 +338,9 @@ fn test_t1_exp04_dont_enlarge_guard() {
         dont_enlarge: false,
     };
     assert_eq!(
-        long_edge_allow.compute_target_dimensions(src_w, src_h).unwrap(),
+        long_edge_allow
+            .compute_target_dimensions(src_w, src_h)
+            .unwrap(),
         (8000, 5333)
     );
 
@@ -392,7 +429,12 @@ async fn test_t1_exp07_collision_policy_rename_cascading() {
     File::create(&f2).unwrap().write_all(b"2").unwrap();
 
     // Resolution should cascade to _2
-    let res = resolver.resolve_path(tmp.path(), "IMG_0588_Natural", "jpg", CollisionPolicy::Rename);
+    let res = resolver.resolve_path(
+        tmp.path(),
+        "IMG_0588_Natural",
+        "jpg",
+        CollisionPolicy::Rename,
+    );
     assert!(res.is_ok());
 
     match res.unwrap() {
@@ -410,7 +452,10 @@ async fn test_t1_exp08_collision_policy_skip() {
 
     // Pre-create target file with known content
     let target = tmp.path().join("IMG_0969__Natural__01.jpg");
-    File::create(&target).unwrap().write_all(b"ORIGINAL").unwrap();
+    File::create(&target)
+        .unwrap()
+        .write_all(b"ORIGINAL")
+        .unwrap();
 
     let job = ExportJob {
         job_id: 20,
@@ -425,9 +470,15 @@ async fn test_t1_exp08_collision_policy_skip() {
         collision_policy: CollisionPolicy::Skip,
     };
 
-    let res = pipeline.execute_export(None, &job).await.expect("Export execution failed");
+    let res = pipeline
+        .execute_export(None, &job)
+        .await
+        .expect("Export execution failed");
     match res {
-        ExportOutcome::Skipped { target_path, reason } => {
+        ExportOutcome::Skipped {
+            target_path,
+            reason,
+        } => {
             assert_eq!(target_path, target);
             assert!(reason.contains("already exists"));
         }
@@ -445,7 +496,10 @@ async fn test_t1_exp09_collision_policy_overwrite() {
     let pipeline = ExportPipeline::new();
 
     let target = tmp.path().join("IMG_0969__Cinema__01.jpg");
-    File::create(&target).unwrap().write_all(b"OLD CONTENT").unwrap();
+    File::create(&target)
+        .unwrap()
+        .write_all(b"OLD CONTENT")
+        .unwrap();
 
     let job = ExportJob {
         job_id: 30,
@@ -460,7 +514,10 @@ async fn test_t1_exp09_collision_policy_overwrite() {
         collision_policy: CollisionPolicy::Overwrite,
     };
 
-    let res = pipeline.execute_export(None, &job).await.expect("Export execution failed");
+    let res = pipeline
+        .execute_export(None, &job)
+        .await
+        .expect("Export execution failed");
     match res {
         ExportOutcome::Success { output_path, .. } => {
             assert_eq!(output_path, target);
@@ -529,14 +586,20 @@ fn test_t1_exp12_prohibited_target_extension_veto() {
     let target_upper = Path::new("export/test.CR3");
     let res_upper = validate_export_path(target_upper, &source_dirs);
     assert!(
-        matches!(res_upper, Err(ExportError::ProhibitedTargetExtension { .. })),
+        matches!(
+            res_upper,
+            Err(ExportError::ProhibitedTargetExtension { .. })
+        ),
         "Target with .CR3 extension must trigger ProhibitedTargetExtension error"
     );
 
     let target_lower = Path::new("export/test.cr3");
     let res_lower = validate_export_path(target_lower, &source_dirs);
     assert!(
-        matches!(res_lower, Err(ExportError::ProhibitedTargetExtension { .. })),
+        matches!(
+            res_lower,
+            Err(ExportError::ProhibitedTargetExtension { .. })
+        ),
         "Target with .cr3 extension must trigger ProhibitedTargetExtension error"
     );
 }
@@ -553,9 +616,7 @@ fn test_t1_exp13_source_immutability_baseline() {
                 assert!(
                     record.is_valid,
                     "CR3 master file {} corrupted! Expected sha256={}, actual={}",
-                    record.filename,
-                    record.expected_sha256,
-                    record.actual_sha256
+                    record.filename, record.expected_sha256, record.actual_sha256
                 );
             }
         }
@@ -566,7 +627,11 @@ fn test_t1_exp13_source_immutability_baseline() {
                 if path.is_file() {
                     let (hash, size) = lightcraft_tui::mcp::integrity::compute_file_sha256(&path)
                         .expect("Failed reading present file");
-                    assert_eq!(size, entry.expected_size, "Size mismatch for {}", entry.filename);
+                    assert_eq!(
+                        size, entry.expected_size,
+                        "Size mismatch for {}",
+                        entry.filename
+                    );
                     assert!(
                         hash.eq_ignore_ascii_case(entry.expected_sha256),
                         "SHA-256 mismatch for {}",

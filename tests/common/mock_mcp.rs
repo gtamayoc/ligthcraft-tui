@@ -544,7 +544,9 @@ impl MockMcpServer {
                         JsonRpcResponse {
                             jsonrpc: "2.0".to_string(),
                             id: req.id,
-                            result: Some(json!({ "success": true, "preset": preset_id, "amount": amount })),
+                            result: Some(
+                                json!({ "success": true, "preset": preset_id, "amount": amount }),
+                            ),
                             error: None,
                         }
                     } else {
@@ -661,9 +663,7 @@ impl MockMcpServer {
                 let photo_id = params
                     .and_then(|p| p.get("photoId"))
                     .and_then(|v| v.as_str());
-                let dir = params
-                    .and_then(|p| p.get("dir"))
-                    .and_then(|v| v.as_str());
+                let dir = params.and_then(|p| p.get("dir")).and_then(|v| v.as_str());
                 let format = params
                     .and_then(|p| p.get("format"))
                     .and_then(|v| v.as_str());
@@ -713,7 +713,9 @@ impl MockMcpServer {
                         jsonrpc: "2.0".to_string(),
                         id: req.id,
                         result: None,
-                        error: Some(JsonRpcError::invalid_params("export requires photoId, dir, and format")),
+                        error: Some(JsonRpcError::invalid_params(
+                            "export requires photoId, dir, and format",
+                        )),
                     }
                 }
             }

@@ -1,0 +1,270 @@
+# Refactorización del flujo interactivo CLI en Rust para automatización fotográfica
+
+## 1. Objetivo general
+
+Analiza y mejora el flujo interactivo del programa de automatización fotográfica desarrollado en Rust mediante Cargo. Actualmente, la aplicación funciona desde la terminal y permite seleccionar diferentes variantes de procesamiento, filtros, ajustes y formatos de salida.
+
+El objetivo es reorganizar la experiencia de usuario para que las decisiones se soliciten en el orden correcto, de forma intuitiva, coherente y extensible, conservando las funcionalidades existentes.
+
+**Importante:** no reescribas el programa desde cero. Inspecciona primero la arquitectura, los módulos, los comandos, las estructuras de datos y el flujo actual. Identifica los puntos concretos que deben modificarse y reutiliza los componentes existentes siempre que sea posible.
+
+## 2. Nuevo flujo de interacción
+
+### Paso 1. Selección de imágenes de entrada
+
+Mantener el mecanismo actual para seleccionar una imagen, varias imágenes o el conjunto de archivos que se desea procesar.
+
+El sistema debe conservar las capacidades actuales de procesamiento por lotes, respetando las rutas, validaciones y reglas existentes.
+
+Si el programa ya admite formatos RAW, CR3 u otros archivos fotográficos, conserva esa compatibilidad.
+
+### Paso 2. Selección de variantes de procesamiento
+
+Presentar el panel actual de variantes, correspondiente al panel 2 del programa.
+
+En este punto, el usuario debe poder seleccionar las variantes artísticas, filtros, ajustes, efectos o configuraciones de procesamiento disponibles.
+
+Ejemplos conceptuales:
+
+- Variante original mejorada.
+- Variantes con filtros artísticos.
+- Variantes de color y contraste.
+- Variantes de fotografía en blanco y negro.
+- Variantes con ajustes de exposición.
+- Variantes personalizadas o presets guardados.
+
+Estos ejemplos no deben convertirse en funcionalidades ficticias: utiliza las opciones que realmente existan en el proyecto y conserva sus identificadores y comportamientos.
+
+La selección debe determinar qué variantes se ejecutarán posteriormente.
+
+**Regla importante:** no solicitar todavía las proporciones de imagen ni los formatos de archivo de salida. Primero debe completarse la selección de variantes.
+
+### Paso 3. Selección de proporciones y formatos geométricos
+
+Una vez confirmadas las variantes, mostrar un nuevo panel para seleccionar las proporciones de imagen que se desean generar.
+
+El panel debe permitir elegir una o varias proporciones, según las necesidades del usuario.
+
+Ejemplo de presentación:
+
+1. Solo 1:1 — cuadrado.
+2. Solo 3:2 — fotografía tradicional.
+3. Solo 4:3 — formato fotográfico clásico.
+4. Solo 16:9 — panorámico.
+5. Solo 4:5 — retrato vertical para redes sociales.
+6. Seleccionar varias proporciones.
+7. Todas las proporciones disponibles.
+8. Personalizar una proporción.
+9. Continuar sin modificar las dimensiones, si esta opción es compatible con el motor actual.
+
+Los valores anteriores son ilustrativos. Revisa los formatos existentes y define un catálogo coherente con las capacidades reales de procesamiento.
+
+No confundir proporción con resolución. Una proporción define la relación entre el ancho y el alto, mientras que la resolución determina las dimensiones finales en píxeles.
+
+#### Comportamiento esperado
+
+- Permitir seleccionar una sola proporción.
+- Permitir seleccionar varias proporciones en una misma ejecución.
+- Evitar duplicar proporciones seleccionadas.
+- Validar las opciones antes de continuar.
+- Permitir regresar al panel anterior para modificar las variantes.
+- Mantener la selección de variantes al regresar, salvo que el usuario decida cambiarla.
+- No generar archivos todavía: esta etapa únicamente define la configuración.
+
+Si se seleccionan varias proporciones, el sistema debe preparar una configuración de salida para cada una.
+
+Por ejemplo, si el usuario selecciona tres variantes y dos proporciones, se deben preparar seis combinaciones de procesamiento, antes de considerar los formatos de archivo y las reglas que eviten duplicados.
+
+La cantidad real de archivos deberá calcularse a partir de las reglas de generación existentes, los formatos elegidos y las posibles exclusiones.
+
+### Paso 4. Selección de formatos de archivo de salida
+
+Después de confirmar las proporciones, solicitar los formatos de archivo que se desean generar.
+
+Este panel debe aparecer únicamente después de completar la selección de variantes y proporciones.
+
+Ejemplo de presentación:
+
+1. Solo TIFF.
+2. Solo PNG.
+3. TIFF y PNG.
+4. Solo JPEG/JPG.
+5. TIFF, PNG y JPEG.
+6. Selección personalizada de formatos disponibles.
+
+La lista final debe construirse a partir de los formatos que el programa realmente admita. No agregues formatos que el motor de procesamiento no pueda exportar correctamente.
+
+El sistema debe permitir seleccionar uno o varios formatos sin repetirlos.
+
+Si el usuario elige TIFF y PNG, cada combinación válida de variante y proporción debe producir las salidas correspondientes en ambos formatos, respetando las capacidades y las reglas de exportación de cada formato.
+
+Si el usuario selecciona un solo formato, no deben generarse archivos adicionales en otros formatos.
+
+### Paso 5. Resumen y confirmación
+
+Antes de iniciar el procesamiento, mostrar un resumen claro de la configuración elegida.
+
+El resumen debe incluir:
+
+- Cantidad de imágenes de entrada.
+- Variantes seleccionadas.
+- Proporciones elegidas.
+- Formatos de salida.
+- Cantidad estimada de combinaciones y archivos.
+- Directorio de destino.
+- Configuraciones o presets que se aplicarán.
+- Opciones adicionales que puedan afectar al resultado.
+
+Ejemplo conceptual:
+
+```text
+RESUMEN DEL PROCESAMIENTO
+
+Imágenes de entrada: 12
+Variantes seleccionadas: 3
+Proporciones: 1:1, 3:2
+Formatos de salida: TIFF, PNG
+
+Combinaciones:
+12 imágenes × 3 variantes × 2 proporciones
+= 72 resultados base
+
+Con dos formatos de salida:
+72 × 2 = 144 archivos potenciales
+
+[1] Confirmar e iniciar
+[2] Modificar variantes
+[3] Modificar proporciones
+[4] Modificar formatos de salida
+[5] Cancelar
+```
+
+Las cifras son ilustrativas. Calcula los resultados reales con base en las entradas válidas, las variantes seleccionadas, las reglas de exportación y las combinaciones que realmente se generarán.
+
+Si existen restricciones de compatibilidad, archivos que se omiten o salidas que se sobrescriben, indícalo antes de ejecutar el procesamiento.
+
+### Paso 6. Ejecución del procesamiento
+
+Después de la confirmación, ejecutar el flujo utilizando las configuraciones seleccionadas.
+
+El motor debe recibir una configuración completa que contenga, como mínimo:
+
+- Archivos de entrada.
+- Variantes de procesamiento.
+- Proporciones o dimensiones de salida.
+- Formatos de archivo.
+- Directorio de destino.
+- Opciones de exportación aplicables.
+
+Mantén separadas la selección de opciones, la construcción del plan y la ejecución del procesamiento.
+
+Evita mezclar la lógica de presentación de la terminal con las operaciones de transformación y exportación de imágenes.
+
+El procesamiento debe respetar las funciones existentes, incluyendo los ajustes fotográficos, la gestión de errores y el tratamiento de archivos por lotes.
+
+## 3. Arquitectura y organización del código
+
+Inspecciona el proyecto y determina cómo encajar este flujo con la arquitectura actual.
+
+Como orientación, separa responsabilidades de la siguiente manera, adaptando los nombres a los módulos que ya existan:
+
+- **Interfaz CLI:** presenta los menús y recoge las selecciones.
+- **Configuración del trabajo:** representa las variantes, proporciones y formatos seleccionados.
+- **Validación:** verifica que las combinaciones sean compatibles.
+- **Planificador de procesamiento:** calcula las tareas y las salidas esperadas.
+- **Motor de procesamiento:** ejecuta las transformaciones de imagen.
+- **Exportación:** gestiona la codificación y escritura de los archivos.
+- **Presets:** conserva las configuraciones reutilizables, si esta funcionalidad ya existe.
+
+Utiliza tipos y estructuras de Rust adecuados para representar las selecciones. Considera enumeraciones para las opciones cerradas y colecciones para las selecciones múltiples.
+
+Evita utilizar cadenas de texto arbitrarias como única representación interna de los formatos y las proporciones cuando puedan representarse de forma tipada.
+
+No introduzcas abstracciones innecesarias ni nuevas dependencias sin justificar su utilidad.
+
+## 4. Reglas de comportamiento
+
+El nuevo flujo debe cumplir las siguientes condiciones:
+
+1. Las variantes se seleccionan antes que las proporciones.
+2. Las proporciones se seleccionan antes que los formatos de archivo.
+3. Los formatos de archivo se solicitan una sola vez por trabajo, salvo que el diseño existente requiera una configuración diferente por variante.
+4. Las selecciones múltiples deben mantenerse de forma coherente entre los paneles.
+5. El usuario debe poder retroceder y corregir selecciones sin reiniciar toda la configuración.
+6. Cancelar debe detener el flujo sin iniciar tareas de procesamiento.
+7. Las entradas inválidas deben mostrar mensajes claros y permitir volver a intentarlo.
+8. No se deben generar archivos duplicados por selecciones repetidas.
+9. Los nombres de salida deben evitar colisiones entre imágenes, variantes y proporciones.
+10. No se deben sobrescribir archivos existentes silenciosamente si el comportamiento actual no lo permite explícitamente.
+11. Las opciones por defecto deben seguir las convenciones existentes del programa.
+12. El procesamiento por lotes debe conservar su comportamiento y rendimiento.
+13. Los errores de exportación deben identificar el archivo o la tarea afectada.
+14. Las configuraciones deben validarse antes de iniciar trabajos potencialmente largos.
+
+## 5. Usabilidad de la terminal
+
+Conserva el estilo visual actual de la aplicación y mejora los menús únicamente cuando sea necesario.
+
+Los paneles deben indicar claramente:
+
+- Qué se está seleccionando.
+- Qué opciones están disponibles.
+- Si se permite selección múltiple.
+- Cómo confirmar.
+- Cómo regresar al panel anterior.
+- Qué significa cada proporción o formato cuando resulte útil.
+
+Evita menús demasiado extensos o ambiguos. Si el proyecto ya utiliza una biblioteca de interfaces para terminal, aprovecha sus componentes.
+
+No cambies innecesariamente los argumentos de Cargo, los comandos existentes ni los mecanismos de ejecución automatizada.
+
+Si la aplicación admite ejecución no interactiva, conserva esa compatibilidad.
+
+## 6. Pruebas y validación
+
+Añade o adapta pruebas para comprobar el flujo nuevo.
+
+Como mínimo, verifica:
+
+- Selección de una variante, una proporción y un formato.
+- Selección de múltiples variantes.
+- Selección de múltiples proporciones.
+- Selección de TIFF y PNG simultáneamente.
+- Selección de JPEG cuando esté soportado.
+- Cálculo correcto del número de salidas.
+- Rechazo de opciones inválidas.
+- Ausencia de duplicados.
+- Regreso a paneles anteriores.
+- Cancelación antes de iniciar el procesamiento.
+- Compatibilidad con los presets existentes.
+- Conservación del comportamiento anterior en las funciones que no deben cambiar.
+
+Ejecuta las pruebas disponibles, además de las comprobaciones de compilación apropiadas, por ejemplo `cargo fmt --check`, `cargo check` y `cargo test`, adaptándolas al workspace real.
+
+No afirmes que una prueba pasó si no se ejecutó o si presentó errores.
+
+## 7. Forma de trabajo
+
+Trabaja de forma incremental:
+
+1. Examina la estructura del proyecto y el flujo CLI actual.
+2. Identifica los módulos responsables de los paneles de selección.
+3. Explica brevemente cómo funciona el flujo actual y qué cambios son necesarios.
+4. Diseña el nuevo flujo antes de modificar el código.
+5. Implementa la refactorización reutilizando las funcionalidades existentes.
+6. Añade las validaciones y pruebas necesarias.
+7. Ejecuta las comprobaciones de calidad disponibles.
+8. Corrige los problemas que sean consecuencia de los cambios realizados.
+9. Resume los archivos modificados, las decisiones tomadas y los resultados de las pruebas.
+
+No elimines funcionalidades existentes ni reemplaces implementaciones funcionales con versiones simplificadas para facilitar la refactorización.
+
+Si encuentras una ambigüedad que afecte a la compatibilidad, al formato de los archivos o a la conservación de las opciones existentes, documenta el problema y adopta la alternativa más conservadora.
+
+## Resultado esperado
+
+Una aplicación CLI de Rust con un flujo de selección claro y extensible:
+
+**Entrada de imágenes → Variantes de procesamiento → Proporciones de imagen → Formatos de archivo → Resumen → Confirmación → Ejecución.**
+
+El resultado debe conservar las capacidades actuales del programa y facilitar la incorporación futura de nuevas proporciones, formatos, filtros y presets, sin convertir el flujo principal en una sucesión desordenada de preguntas.

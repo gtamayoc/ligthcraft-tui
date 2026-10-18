@@ -65,7 +65,10 @@ fn main() {
                         let _ = writeln!(stdout, "{{\"jsonrpc\":\"2.0\", \"id\":");
                         let _ = stdout.flush();
                         // Emit response missing ID
-                        let _ = writeln!(stdout, r#"{{"jsonrpc":"2.0","result":{{"status":"missing_id"}}}}"#);
+                        let _ = writeln!(
+                            stdout,
+                            r#"{{"jsonrpc":"2.0","result":{{"status":"missing_id"}}}}"#
+                        );
                         let _ = stdout.flush();
                         // Emit response with invalid jsonrpc version string
                         let _ = writeln!(
@@ -196,7 +199,8 @@ fn main() {
 
                 "stderr_flood" => {
                     // Flood 100 KB to stderr before answering
-                    let err_junk = "WARNING: Pipe buffer saturation stress test line\n".repeat(2000);
+                    let err_junk =
+                        "WARNING: Pipe buffer saturation stress test line\n".repeat(2000);
                     eprint!("{}", err_junk);
 
                     if let Some(Ok(line)) = lines.next() {

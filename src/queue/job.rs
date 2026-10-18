@@ -1,8 +1,8 @@
 //! Batch processing job models, photographic metadata, and dual processing strategies (F-BAT-03).
 
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use serde::{Deserialize, Serialize};
 
 use crate::engine::recipe::Recipe;
 use crate::queue::QueueError;
@@ -30,10 +30,10 @@ impl Orientation {
 /// Photographic aspect ratio representation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum AspectRatio {
-    Ratio3x2,   // ~1.50 (e.g. 6000x4000 Canon CR3)
-    Ratio16x9,  // ~1.778
-    Ratio1x1,   // 1.00
-    Ratio4x3,   // ~1.333
+    Ratio3x2,  // ~1.50 (e.g. 6000x4000 Canon CR3)
+    Ratio16x9, // ~1.778
+    Ratio1x1,  // 1.00
+    Ratio4x3,  // ~1.333
     Custom(f32),
 }
 
@@ -82,14 +82,9 @@ pub struct ScannedPhoto {
 )]
 pub enum BatchStrategy {
     /// Uniform batch: single master recipe applied across all selected photos (M x 1).
-    Uniform {
-        recipe: Recipe,
-        intensity: f32,
-    },
+    Uniform { recipe: Recipe, intensity: f32 },
     /// Multi-recipe variations: N recipes applied to each selected photo (M x N).
-    MultiRecipeVariations {
-        recipes: Vec<(Recipe, f32)>,
-    },
+    MultiRecipeVariations { recipes: Vec<(Recipe, f32)> },
 }
 
 /// Summary pre-check for a batch processing plan.
@@ -106,13 +101,28 @@ pub struct BatchSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum BatchJobStatus {
     Queued,
-    Developing { progress_pct: u8 },
-    Rendering { progress_pct: u8 },
-    Written { output_path: PathBuf, bytes: u64 },
-    Done { output_path: PathBuf, bytes_written: u64, elapsed: Duration },
-    Failed { error_message: String },
+    Developing {
+        progress_pct: u8,
+    },
+    Rendering {
+        progress_pct: u8,
+    },
+    Written {
+        output_path: PathBuf,
+        bytes: u64,
+    },
+    Done {
+        output_path: PathBuf,
+        bytes_written: u64,
+        elapsed: Duration,
+    },
+    Failed {
+        error_message: String,
+    },
     Cancelled,
-    Skipped { reason: String },
+    Skipped {
+        reason: String,
+    },
 }
 
 /// Full job definition representing a single photographic processing task.

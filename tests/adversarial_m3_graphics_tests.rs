@@ -5,8 +5,6 @@
 //! 2. Aspect ratio edge cases (100:1 panorama, 1:100 tall strip, 0 width/height, NaN/Inf handling).
 //! 3. PreviewCache memory budget stress (200MB+ flood against 64MB budget, byte-level eviction, weak ref drop verification).
 
-use std::path::PathBuf;
-use std::sync::{Arc, Weak};
 use image::imageops::FilterType;
 use image::{DynamicImage, Rgba, RgbaImage};
 use ratatui::backend::TestBackend;
@@ -14,6 +12,8 @@ use ratatui::layout::Rect;
 use ratatui::Terminal;
 use ratatui_image::picker::Picker;
 use ratatui_image::FontSize;
+use std::path::PathBuf;
+use std::sync::{Arc, Weak};
 
 use lightcraft_tui::app::AppController;
 use lightcraft_tui::graphics::cache::{
@@ -24,9 +24,7 @@ use lightcraft_tui::graphics::renderer::ImageRenderer;
 use lightcraft_tui::mcp::client::{McpClient, McpClientConfig};
 use lightcraft_tui::storage::presets_store::PresetStore;
 use lightcraft_tui::tui::layout::{AppLayout, PaneId};
-use lightcraft_tui::tui::mode_a::{
-    compute_variant_grid_rects, composite_wiper, LoupeState,
-};
+use lightcraft_tui::tui::mode_a::{composite_wiper, compute_variant_grid_rects, LoupeState};
 
 // ============================================================================
 // PART 1: TERMINAL RESIZE TORTURE TESTS
@@ -77,7 +75,10 @@ fn test_adv_layout_exact_boundary_thresholds() {
     // Exact minimum threshold is 60x20
     let exact_min = Rect::new(0, 0, AppLayout::MIN_WIDTH, AppLayout::MIN_HEIGHT);
     let layout_min = AppLayout::compute(exact_min);
-    assert!(!layout_min.is_too_small, "60x20 must satisfy minimum dimensions");
+    assert!(
+        !layout_min.is_too_small,
+        "60x20 must satisfy minimum dimensions"
+    );
     assert_eq!(layout_min.header_area.height, 1);
     assert_eq!(layout_min.status_area.height, 2);
     assert_eq!(layout_min.library_area.height, 17);
@@ -85,12 +86,44 @@ fn test_adv_layout_exact_boundary_thresholds() {
     assert!(layout_min.preview_area.width > 0);
 
     // One pixel below in either axis must fail
-    assert!(AppLayout::compute(Rect::new(0, 0, AppLayout::MIN_WIDTH - 1, AppLayout::MIN_HEIGHT)).is_too_small);
-    assert!(AppLayout::compute(Rect::new(0, 0, AppLayout::MIN_WIDTH, AppLayout::MIN_HEIGHT - 1)).is_too_small);
-    assert!(AppLayout::compute(Rect::new(0, 0, AppLayout::MIN_WIDTH - 1, AppLayout::MIN_HEIGHT - 1)).is_too_small);
+    assert!(
+        AppLayout::compute(Rect::new(
+            0,
+            0,
+            AppLayout::MIN_WIDTH - 1,
+            AppLayout::MIN_HEIGHT
+        ))
+        .is_too_small
+    );
+    assert!(
+        AppLayout::compute(Rect::new(
+            0,
+            0,
+            AppLayout::MIN_WIDTH,
+            AppLayout::MIN_HEIGHT - 1
+        ))
+        .is_too_small
+    );
+    assert!(
+        AppLayout::compute(Rect::new(
+            0,
+            0,
+            AppLayout::MIN_WIDTH - 1,
+            AppLayout::MIN_HEIGHT - 1
+        ))
+        .is_too_small
+    );
 
     // One pixel above in both axes must succeed
-    assert!(!AppLayout::compute(Rect::new(0, 0, AppLayout::MIN_WIDTH + 1, AppLayout::MIN_HEIGHT + 1)).is_too_small);
+    assert!(
+        !AppLayout::compute(Rect::new(
+            0,
+            0,
+            AppLayout::MIN_WIDTH + 1,
+            AppLayout::MIN_HEIGHT + 1
+        ))
+        .is_too_small
+    );
 }
 
 #[test]
@@ -104,10 +137,15 @@ fn test_adv_layout_breakpoint_transitions_no_gap_or_overlap() {
             let area = Rect::new(0, 0, w, h);
             let layout = AppLayout::compute(area);
 
-            assert!(!layout.is_too_small, "Dimensions {}x{} should be valid", w, h);
+            assert!(
+                !layout.is_too_small,
+                "Dimensions {}x{} should be valid",
+                w, h
+            );
 
             // Verify vertical split partition
-            let vert_sum = layout.header_area.height + layout.library_area.height + layout.status_area.height;
+            let vert_sum =
+                layout.header_area.height + layout.library_area.height + layout.status_area.height;
             assert_eq!(
                 vert_sum, h,
                 "Vertical panes height sum ({}) must equal terminal height ({}) for {}x{}",
@@ -187,9 +225,17 @@ fn test_adv_layout_rapid_resize_bursts_60_cycles() {
         let layout = AppLayout::compute(area);
 
         if w < AppLayout::MIN_WIDTH || h < AppLayout::MIN_HEIGHT {
-            assert!(layout.is_too_small, "Step {}: {}x{} must be too small", step, w, h);
+            assert!(
+                layout.is_too_small,
+                "Step {}: {}x{} must be too small",
+                step, w, h
+            );
         } else {
-            assert!(!layout.is_too_small, "Step {}: {}x{} must be valid", step, w, h);
+            assert!(
+                !layout.is_too_small,
+                "Step {}: {}x{} must be valid",
+                step, w, h
+            );
             let sum_w = layout.library_area.width + layout.preview_area.width;
             assert_eq!(sum_w, w, "Step {}: width mismatch", step);
         }
@@ -200,9 +246,14 @@ fn test_adv_layout_rapid_resize_bursts_60_cycles() {
 async fn test_adv_render_full_app_under_torture_dimensions() {
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     let torture_sizes = [
         (1, 1),
@@ -419,8 +470,12 @@ fn test_adv_prepare_protocol_error_on_zero_area() {
     let img = DynamicImage::ImageRgba8(RgbaImage::new(10, 10));
 
     // Zero pane must return error cleanly without panic
-    let res = ImageRenderer::prepare_protocol(&picker, &img, Rect::new(0, 0, 0, 0), FilterType::Nearest);
-    assert!(res.is_err(), "Zero pane area must return Err(AppError::Image)");
+    let res =
+        ImageRenderer::prepare_protocol(&picker, &img, Rect::new(0, 0, 0, 0), FilterType::Nearest);
+    assert!(
+        res.is_err(),
+        "Zero pane area must return Err(AppError::Image)"
+    );
 }
 
 #[test]
@@ -521,7 +576,9 @@ fn test_adv_preview_cache_flood_200mb_against_64mb_budget() {
         assert!(
             current <= max_budget_bytes,
             "Memory violation at insertion #{}: current {} > budget {}",
-            i, current, max_budget_bytes
+            i,
+            current,
+            max_budget_bytes
         );
     }
 
@@ -623,7 +680,8 @@ fn test_adv_preview_cache_protocol_flood_and_tier1_eviction() {
 
     // Insert 50 rendered protocol frames (each ~150 KB)
     for i in 0..50 {
-        let (proto, rect) = ImageRenderer::prepare_protocol(&picker, &img, pane, FilterType::Nearest).unwrap();
+        let (proto, rect) =
+            ImageRenderer::prepare_protocol(&picker, &img, pane, FilterType::Nearest).unwrap();
         let key = PreviewCacheKey {
             photo_id: format!("photo_proto_{}", i),
             recipe_hash: i as u64,
@@ -671,7 +729,8 @@ fn test_adv_preview_cache_interleaved_tier1_tier2_flood_and_purge() {
         cache.insert_source_image(&photo_id, 42, dyn_img.clone());
 
         // Tier 1: Protocol frame
-        let (proto, rect) = ImageRenderer::prepare_protocol(&picker, &dyn_img, pane, FilterType::Nearest).unwrap();
+        let (proto, rect) =
+            ImageRenderer::prepare_protocol(&picker, &dyn_img, pane, FilterType::Nearest).unwrap();
         let key = PreviewCacheKey {
             photo_id: photo_id.clone(),
             recipe_hash: 42,

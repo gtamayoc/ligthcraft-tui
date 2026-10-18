@@ -102,7 +102,9 @@ impl NamingTemplate {
             let padding = pad_str.parse::<usize>().unwrap_or(1).clamp(1, 10);
             Token::Seq { padding }
         } else if trimmed.eq_ignore_ascii_case("date") {
-            Token::Date { custom_format: None }
+            Token::Date {
+                custom_format: None,
+            }
         } else if let Some(fmt) = trimmed.strip_prefix("date:") {
             Token::Date {
                 custom_format: Some(fmt.to_string()),
@@ -126,7 +128,9 @@ impl NamingTemplate {
                     let mut cleaned = String::with_capacity(s.len());
                     for ch in s.chars() {
                         match ch {
-                            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => cleaned.push('_'),
+                            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => {
+                                cleaned.push('_')
+                            }
                             c => cleaned.push(c),
                         }
                     }
@@ -159,7 +163,11 @@ impl NamingTemplate {
         let trimmed_result = result.trim_end_matches('.');
         let ext_suffix = format!(".{}", clean_ext);
 
-        if !has_ext_token && !trimmed_result.to_lowercase().ends_with(&ext_suffix.to_lowercase()) {
+        if !has_ext_token
+            && !trimmed_result
+                .to_lowercase()
+                .ends_with(&ext_suffix.to_lowercase())
+        {
             format!("{}.{}", trimmed_result, clean_ext)
         } else {
             trimmed_result.to_string()
@@ -188,9 +196,8 @@ pub fn sanitize_filename_component(name: &str) -> String {
 
     let upper = trimmed.to_ascii_uppercase();
     const RESERVED: &[&str] = &[
-        "CON", "PRN", "AUX", "NUL",
-        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
 
     if RESERVED.contains(&upper.as_str()) {

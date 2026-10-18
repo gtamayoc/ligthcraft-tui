@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::sync::{mpsc, Mutex, Semaphore, watch};
+use tokio::sync::{mpsc, watch, Mutex, Semaphore};
 use tokio_util::sync::CancellationToken;
 
 use crate::export::{CollisionPolicy, ExportJob, ExportOutcome, ExportPipeline, NamingTemplate};
@@ -33,8 +33,12 @@ impl Default for DirectoryScannerConfig {
             follow_symlinks: false,
             max_depth: 32,
             allowed_extensions: vec![
-                "cr3".into(), "jpg".into(), "jpeg".into(),
-                "png".into(), "tiff".into(), "tif".into(),
+                "cr3".into(),
+                "jpg".into(),
+                "jpeg".into(),
+                "png".into(),
+                "tiff".into(),
+                "tif".into(),
             ],
         }
     }
@@ -83,7 +87,8 @@ impl DirectoryScanner {
                     if config.recursive && depth + 1 <= config.max_depth {
                         queue.push_back((p, depth + 1));
                     }
-                } else if file_type.is_file() || (config.follow_symlinks && file_type.is_symlink()) {
+                } else if file_type.is_file() || (config.follow_symlinks && file_type.is_symlink())
+                {
                     if let Some(ext) = p.extension() {
                         let ext_norm = ext.to_string_lossy().to_lowercase();
                         if allowed_exts.contains(&ext_norm) {
@@ -141,10 +146,10 @@ impl BatchFilter {
     pub fn matches(&self, photo: &ScannedPhoto) -> bool {
         // 1. Extension inclusion check
         if !self.extensions_include.is_empty() {
-            let matched = self
-                .extensions_include
-                .iter()
-                .any(|ext| ext.trim_start_matches('.').eq_ignore_ascii_case(&photo.extension));
+            let matched = self.extensions_include.iter().any(|ext| {
+                ext.trim_start_matches('.')
+                    .eq_ignore_ascii_case(&photo.extension)
+            });
             if !matched {
                 return false;
             }
@@ -152,10 +157,10 @@ impl BatchFilter {
 
         // 2. Extension exclusion check
         if !self.extensions_exclude.is_empty() {
-            let excluded = self
-                .extensions_exclude
-                .iter()
-                .any(|ext| ext.trim_start_matches('.').eq_ignore_ascii_case(&photo.extension));
+            let excluded = self.extensions_exclude.iter().any(|ext| {
+                ext.trim_start_matches('.')
+                    .eq_ignore_ascii_case(&photo.extension)
+            });
             if excluded {
                 return false;
             }

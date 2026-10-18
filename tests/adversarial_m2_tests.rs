@@ -13,12 +13,12 @@
 
 mod common;
 
+#[path = "../src/engine/mod.rs"]
+pub mod engine;
 #[path = "../src/error.rs"]
 pub mod error;
 #[path = "../src/mcp/mod.rs"]
 pub mod mcp;
-#[path = "../src/engine/mod.rs"]
-pub mod engine;
 #[path = "../src/storage/mod.rs"]
 pub mod storage;
 
@@ -71,18 +71,18 @@ fn assert_recipe_within_bounds(r: &Recipe, context: &str) {
     check_slider!(DevelopSlider::Saturation, r.saturation, "saturation");
     check_slider!(DevelopSlider::Clarity, r.clarity, "clarity");
     check_slider!(DevelopSlider::Dehaze, r.dehaze, "dehaze");
-    check_slider!(DevelopSlider::SharpenAmount, r.sharpen_amount, "sharpen_amount");
+    check_slider!(
+        DevelopSlider::SharpenAmount,
+        r.sharpen_amount,
+        "sharpen_amount"
+    );
     check_slider!(DevelopSlider::NrLuminance, r.nr_luminance, "nr_luminance");
     check_slider!(DevelopSlider::NrColor, r.nr_color, "nr_color");
     check_slider!(DevelopSlider::Vignette, r.vignette, "vignette");
 
     if let Some(temp) = r.temperature {
         let bounds = DevelopSlider::Temperature.bounds();
-        assert!(
-            !temp.is_nan(),
-            "[{}] temperature must not be NaN",
-            context
-        );
+        assert!(!temp.is_nan(), "[{}] temperature must not be NaN", context);
         assert!(
             !temp.is_infinite(),
             "[{}] temperature must not be Infinite",
@@ -129,7 +129,12 @@ fn assert_recipe_within_bounds(r: &Recipe, context: &str) {
             (bw.magenta, "bw.magenta"),
         ] {
             assert!(!val.is_nan(), "[{}] {} must not be NaN", context, name);
-            assert!(val >= -100.0 && val <= 100.0, "[{}] {} outside [-100, 100]", context, name);
+            assert!(
+                val >= -100.0 && val <= 100.0,
+                "[{}] {} outside [-100, 100]",
+                context,
+                name
+            );
         }
     }
 
@@ -140,8 +145,18 @@ fn assert_recipe_within_bounds(r: &Recipe, context: &str) {
             (&g.highlights, "grading.highlights"),
             (&g.global, "grading.global"),
         ] {
-            assert!(!hsl.sat.is_nan() && hsl.sat >= 0.0 && hsl.sat <= 100.0, "[{}] {} sat out of bounds", context, name);
-            assert!(!hsl.lum.is_nan() && hsl.lum >= -100.0 && hsl.lum <= 100.0, "[{}] {} lum out of bounds", context, name);
+            assert!(
+                !hsl.sat.is_nan() && hsl.sat >= 0.0 && hsl.sat <= 100.0,
+                "[{}] {} sat out of bounds",
+                context,
+                name
+            );
+            assert!(
+                !hsl.lum.is_nan() && hsl.lum >= -100.0 && hsl.lum <= 100.0,
+                "[{}] {} lum out of bounds",
+                context,
+                name
+            );
         }
     }
 
@@ -152,8 +167,19 @@ fn assert_recipe_within_bounds(r: &Recipe, context: &str) {
     for (k, v) in &r.custom_sliders {
         if let Some(num) = v.as_f64() {
             assert!(!num.is_nan(), "[{}] custom slider {} is NaN", context, k);
-            assert!(!num.is_infinite(), "[{}] custom slider {} is Infinite", context, k);
-            assert!(num >= -100.0 && num <= 100.0, "[{}] custom slider {} = {} outside [-100, 100]", context, k, num);
+            assert!(
+                !num.is_infinite(),
+                "[{}] custom slider {} is Infinite",
+                context,
+                k
+            );
+            assert!(
+                num >= -100.0 && num <= 100.0,
+                "[{}] custom slider {} = {} outside [-100, 100]",
+                context,
+                k,
+                num
+            );
         }
     }
 }
@@ -221,7 +247,12 @@ fn test_adv_fp_01_nan_and_infinities_to_apply_intensity() {
             let flat = recipe.evaluate_flat(*fp_val, Some(5500.0));
             for (k, v) in &flat {
                 assert!(!v.is_nan(), "[{}] flat value for {} is NaN", ctx, k);
-                assert!(!v.is_infinite(), "[{}] flat value for {} is Infinite", ctx, k);
+                assert!(
+                    !v.is_infinite(),
+                    "[{}] flat value for {} is Infinite",
+                    ctx,
+                    k
+                );
             }
         }
     }
@@ -290,13 +321,26 @@ fn test_adv_oob_01_negative_intensities_clamp_to_zero() {
             assert_eq!(scaled.saturation, 0.0, "[{}] saturation must be 0.0", ctx);
             assert_eq!(scaled.clarity, 0.0, "[{}] clarity must be 0.0", ctx);
             assert_eq!(scaled.dehaze, 0.0, "[{}] dehaze must be 0.0", ctx);
-            assert_eq!(scaled.sharpen_amount, 0.0, "[{}] sharpen_amount must be 0.0", ctx);
-            assert_eq!(scaled.nr_luminance, 0.0, "[{}] nr_luminance must be 0.0", ctx);
+            assert_eq!(
+                scaled.sharpen_amount, 0.0,
+                "[{}] sharpen_amount must be 0.0",
+                ctx
+            );
+            assert_eq!(
+                scaled.nr_luminance, 0.0,
+                "[{}] nr_luminance must be 0.0",
+                ctx
+            );
             assert_eq!(scaled.nr_color, 0.0, "[{}] nr_color must be 0.0", ctx);
             assert_eq!(scaled.vignette, 0.0, "[{}] vignette must be 0.0", ctx);
 
             if original.temperature.is_some() {
-                assert_eq!(scaled.temperature, Some(5500.0), "[{}] temp must be 5500K", ctx);
+                assert_eq!(
+                    scaled.temperature,
+                    Some(5500.0),
+                    "[{}] temp must be 5500K",
+                    ctx
+                );
             }
         }
     }
@@ -317,15 +361,51 @@ fn test_adv_oob_02_excessive_intensities_clamp_to_150_percent() {
             assert_recipe_within_bounds(&scaled, &ctx);
 
             // Any value > 1.5 must produce the exact same clamped result as intensity = 1.5
-            assert_eq!(scaled.exposure, target_150.exposure, "[{}] exposure mismatch", ctx);
-            assert_eq!(scaled.contrast, target_150.contrast, "[{}] contrast mismatch", ctx);
-            assert_eq!(scaled.highlights, target_150.highlights, "[{}] highlights mismatch", ctx);
-            assert_eq!(scaled.shadows, target_150.shadows, "[{}] shadows mismatch", ctx);
-            assert_eq!(scaled.whites, target_150.whites, "[{}] whites mismatch", ctx);
-            assert_eq!(scaled.blacks, target_150.blacks, "[{}] blacks mismatch", ctx);
-            assert_eq!(scaled.temperature, target_150.temperature, "[{}] temperature mismatch", ctx);
-            assert_eq!(scaled.clarity, target_150.clarity, "[{}] clarity mismatch", ctx);
-            assert_eq!(scaled.sharpen_amount, target_150.sharpen_amount, "[{}] sharpen mismatch", ctx);
+            assert_eq!(
+                scaled.exposure, target_150.exposure,
+                "[{}] exposure mismatch",
+                ctx
+            );
+            assert_eq!(
+                scaled.contrast, target_150.contrast,
+                "[{}] contrast mismatch",
+                ctx
+            );
+            assert_eq!(
+                scaled.highlights, target_150.highlights,
+                "[{}] highlights mismatch",
+                ctx
+            );
+            assert_eq!(
+                scaled.shadows, target_150.shadows,
+                "[{}] shadows mismatch",
+                ctx
+            );
+            assert_eq!(
+                scaled.whites, target_150.whites,
+                "[{}] whites mismatch",
+                ctx
+            );
+            assert_eq!(
+                scaled.blacks, target_150.blacks,
+                "[{}] blacks mismatch",
+                ctx
+            );
+            assert_eq!(
+                scaled.temperature, target_150.temperature,
+                "[{}] temperature mismatch",
+                ctx
+            );
+            assert_eq!(
+                scaled.clarity, target_150.clarity,
+                "[{}] clarity mismatch",
+                ctx
+            );
+            assert_eq!(
+                scaled.sharpen_amount, target_150.sharpen_amount,
+                "[{}] sharpen mismatch",
+                ctx
+            );
         }
     }
 }
@@ -334,9 +414,9 @@ fn test_adv_oob_02_excessive_intensities_clamp_to_150_percent() {
 fn test_adv_oob_03_extreme_recipe_slider_clamping_at_150() {
     // Construct recipe with sliders that WOULD blow past bounds if not clamped
     let mut r = Recipe::default();
-    r.exposure = 4.5;    // 4.5 * 1.5 = 6.75 -> must clamp to 5.0
-    r.contrast = 80.0;   // 80.0 * 1.5 = 120.0 -> must clamp to 100.0
-    r.highlights = -90.0;// -90.0 * 1.5 = -135.0 -> must clamp to -100.0
+    r.exposure = 4.5; // 4.5 * 1.5 = 6.75 -> must clamp to 5.0
+    r.contrast = 80.0; // 80.0 * 1.5 = 120.0 -> must clamp to 100.0
+    r.highlights = -90.0; // -90.0 * 1.5 = -135.0 -> must clamp to -100.0
     r.temperature = Some(45000.0); // 5500 + (39500 * 1.5) = 64750 -> must clamp to 50000.0
     r.sharpen_amount = 120.0; // 120.0 * 1.5 = 180.0 -> must clamp to 150.0
 
@@ -366,7 +446,12 @@ fn test_adv_monotonicity_01_builtin_presets_sweep() {
         for step in 1..=steps {
             let intensity = step as f64 * (1.5 / steps as f64);
             let current_scaled = nominal.apply_intensity(intensity);
-            let ctx = format!("Preset '{}' from i={} to i={}", p.id(), prev_intensity, intensity);
+            let ctx = format!(
+                "Preset '{}' from i={} to i={}",
+                p.id(),
+                prev_intensity,
+                intensity
+            );
 
             // Verify bounds at every step
             assert_recipe_within_bounds(&current_scaled, &ctx);
@@ -557,7 +642,10 @@ fn test_adv_builtin_01_all_presets_valid_across_intensity_range() {
             let base_settings = DevelopSettings::default();
             let applied = DevelopBridge::apply_recipe_to_settings(&base_settings, &scaled, 1.0);
             let back = DevelopBridge::settings_to_recipe(&applied, &scaled.name);
-            assert_recipe_within_bounds(&back, &format!("Preset '{}' roundtrip at i={}", p.id(), i));
+            assert_recipe_within_bounds(
+                &back,
+                &format!("Preset '{}' roundtrip at i={}", p.id(), i),
+            );
         }
     }
 }
@@ -569,7 +657,8 @@ fn test_adv_builtin_02_serialization_roundtrip_stability() {
 
         // TOML round-trip
         let toml_str = toml::to_string(&r).expect("TOML serialization failed");
-        let toml_deserialized: Recipe = toml::from_str(&toml_str).expect("TOML deserialization failed");
+        let toml_deserialized: Recipe =
+            toml::from_str(&toml_str).expect("TOML deserialization failed");
         assert_eq!(r.id, toml_deserialized.id);
         assert_eq!(r.exposure, toml_deserialized.exposure);
         assert_eq!(r.contrast, toml_deserialized.contrast);
@@ -577,7 +666,8 @@ fn test_adv_builtin_02_serialization_roundtrip_stability() {
 
         // JSON round-trip
         let json_str = serde_json::to_string(&r).expect("JSON serialization failed");
-        let json_deserialized: Recipe = serde_json::from_str(&json_str).expect("JSON deserialization failed");
+        let json_deserialized: Recipe =
+            serde_json::from_str(&json_str).expect("JSON deserialization failed");
         assert_eq!(r.id, json_deserialized.id);
         assert_eq!(r.exposure, json_deserialized.exposure);
         assert_eq!(r.contrast, json_deserialized.contrast);
@@ -604,7 +694,10 @@ fn test_adv_state_01_nan_slider_in_recipe_is_sanitized_by_clamp() {
     bad_recipe.highlights = f32::NEG_INFINITY;
 
     let sanitized = bad_recipe.apply_intensity(1.0);
-    assert!(!sanitized.exposure.is_nan(), "NaN exposure must be sanitized");
+    assert!(
+        !sanitized.exposure.is_nan(),
+        "NaN exposure must be sanitized"
+    );
     assert_eq!(sanitized.exposure, 0.0);
     assert_eq!(sanitized.contrast, 100.0);
     assert_eq!(sanitized.highlights, -100.0);
@@ -627,11 +720,12 @@ fn test_adv_state_02_temperature_infinities() {
 fn test_adv_state_03_nan_temperature_behavior() {
     let mut r = Recipe::default();
     r.temperature = Some(f32::NAN);
-    let result = std::panic::catch_unwind(move || {
-        r.apply_intensity(1.0)
-    });
+    let result = std::panic::catch_unwind(move || r.apply_intensity(1.0));
     // Record empirical behavior: apply_intensity does NOT panic when recipe.temperature is Some(NaN)
-    assert!(result.is_ok(), "apply_intensity must not panic on NaN temperature");
+    assert!(
+        result.is_ok(),
+        "apply_intensity must not panic on NaN temperature"
+    );
     let scaled = result.unwrap();
     assert!(scaled.temperature.is_some());
     // Note: scaled.temperature retains NaN because recipe.rs line 574 uses (base + delta * i).clamp(...)

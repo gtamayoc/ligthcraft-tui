@@ -1,7 +1,7 @@
 //! Image buffer downscaling, aspect-ratio preservation, and protocol rendering adapter.
 
-use image::DynamicImage;
 use image::imageops::FilterType;
+use image::DynamicImage;
 use ratatui::layout::{Rect, Size};
 use ratatui_image::picker::Picker;
 use ratatui_image::protocol::Protocol;
@@ -100,20 +100,21 @@ impl ImageRenderer {
         }
 
         // Downscale before protocol encoding to conserve memory and avoid UI thread latency
-        let downscaled = if picker.protocol_type() == ratatui_image::picker::ProtocolType::Halfblocks {
-            // Halfblocks requires width cells and height * 2 pixels
-            img.resize_exact(
-                fit.render_area.width as u32,
-                (fit.render_area.height as u32 * 2).max(1),
-                filter,
-            )
-        } else {
-            img.resize_exact(
-                fit.target_pixel_size.0.max(1),
-                fit.target_pixel_size.1.max(1),
-                filter,
-            )
-        };
+        let downscaled =
+            if picker.protocol_type() == ratatui_image::picker::ProtocolType::Halfblocks {
+                // Halfblocks requires width cells and height * 2 pixels
+                img.resize_exact(
+                    fit.render_area.width as u32,
+                    (fit.render_area.height as u32 * 2).max(1),
+                    filter,
+                )
+            } else {
+                img.resize_exact(
+                    fit.target_pixel_size.0.max(1),
+                    fit.target_pixel_size.1.max(1),
+                    filter,
+                )
+            };
 
         let size = Size::new(fit.render_area.width, fit.render_area.height);
         let proto = picker

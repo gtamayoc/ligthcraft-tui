@@ -13,12 +13,12 @@
 
 mod common;
 
+#[path = "../src/engine/mod.rs"]
+pub mod engine;
 #[path = "../src/error.rs"]
 pub mod error;
 #[path = "../src/mcp/mod.rs"]
 pub mod mcp;
-#[path = "../src/engine/mod.rs"]
-pub mod engine;
 #[path = "../src/storage/mod.rs"]
 pub mod storage;
 
@@ -31,7 +31,9 @@ use engine::presets::BuiltinPreset;
 use engine::recipe::{DevelopSlider, Recipe, RecipeCategory, TrackKind};
 use error::StorageError;
 use mcp::tools::{DevelopSettings, McpPresetInfo};
-use storage::presets_store::{validate_identifier, PresetFile, PresetFormat, PresetMetadata, PresetStore};
+use storage::presets_store::{
+    validate_identifier, PresetFile, PresetFormat, PresetMetadata, PresetStore,
+};
 
 // ============================================================================
 // Feature F-REC-01: Multi-Slider Photographic Recipe Model
@@ -128,18 +130,27 @@ fn test_t1_rec01_03_white_balance_translation() {
     let as_shot = Recipe::default();
     assert!(as_shot.temperature.is_none());
     let flat_as_shot = as_shot.evaluate_flat(1.0, None);
-    assert!(!flat_as_shot.contains_key("wb.temp"), "Preserved as-shot temperature must not inject wb.temp");
+    assert!(
+        !flat_as_shot.contains_key("wb.temp"),
+        "Preserved as-shot temperature must not inject wb.temp"
+    );
 
     // Explicit Kelvin bounds verification
     let mut extreme_warm = Recipe::default();
     extreme_warm.temperature = Some(55000.0);
     let flat_warm = extreme_warm.evaluate_flat(1.0, None);
-    assert_eq!(flat_warm["wb.temp"], 50000.0, "Kelvin upper bound clamped at 50,000K");
+    assert_eq!(
+        flat_warm["wb.temp"], 50000.0,
+        "Kelvin upper bound clamped at 50,000K"
+    );
 
     let mut extreme_cold = Recipe::default();
     extreme_cold.temperature = Some(1000.0);
     let flat_cold = extreme_cold.evaluate_flat(1.0, None);
-    assert_eq!(flat_cold["wb.temp"], 2000.0, "Kelvin lower bound clamped at 2,000K");
+    assert_eq!(
+        flat_cold["wb.temp"], 2000.0,
+        "Kelvin lower bound clamped at 2,000K"
+    );
 
     fixture.assert_integrity();
 }
@@ -177,8 +188,14 @@ fn test_t1_rec01_05_recipe_clone_and_mutation() {
     clone.exposure = 1.0;
     clone.contrast = 45.0;
 
-    assert_eq!(original.exposure, 0.25, "Original must remain completely untouched");
-    assert_eq!(original.contrast, 10.0, "Original must remain completely untouched");
+    assert_eq!(
+        original.exposure, 0.25,
+        "Original must remain completely untouched"
+    );
+    assert_eq!(
+        original.contrast, 10.0,
+        "Original must remain completely untouched"
+    );
     assert_eq!(clone.exposure, 1.0);
     assert_eq!(clone.contrast, 45.0);
 
@@ -229,8 +246,16 @@ fn test_t1_rec02_01_zero_neutral_intensity() {
     assert_eq!(scaled.nr_luminance, 0.0);
     assert_eq!(scaled.nr_color, 0.0);
     assert_eq!(scaled.vignette, 0.0);
-    assert_eq!(scaled.temperature, Some(5500.0), "0% intensity evaluates temperature to 5500K baseline");
-    assert_eq!(scaled.treatment, Some("color".into()), "0% intensity restores color baseline");
+    assert_eq!(
+        scaled.temperature,
+        Some(5500.0),
+        "0% intensity evaluates temperature to 5500K baseline"
+    );
+    assert_eq!(
+        scaled.treatment,
+        Some("color".into()),
+        "0% intensity restores color baseline"
+    );
 
     let flat = recipe.evaluate_flat(0.0, Some(6500.0));
     assert_eq!(flat["light.exposure"], 0.0);
@@ -311,8 +336,8 @@ fn test_t1_rec02_04_amplified_150_clamped_intensity() {
     let fixture = TestFixture::new("rec02_amplified_150");
 
     let mut recipe = Recipe::default();
-    recipe.contrast = 80.0;   // 80 * 1.5 = 120 -> clamped to 100.0
-    recipe.exposure = -4.0;   // -4 * 1.5 = -6.0 -> clamped to -5.0
+    recipe.contrast = 80.0; // 80 * 1.5 = 120 -> clamped to 100.0
+    recipe.exposure = -4.0; // -4 * 1.5 = -6.0 -> clamped to -5.0
     recipe.highlights = 80.0; // 80 * 1.5 = 120 -> clamped to 100.0
     recipe.sharpen_amount = 120.0; // 120 * 1.5 = 180 -> clamped to 150.0
     recipe.temperature = Some(40000.0); // delta = 34500K; 5500 + 1.5*34500 = 57250 -> clamped to 50000.0
@@ -322,8 +347,15 @@ fn test_t1_rec02_04_amplified_150_clamped_intensity() {
     assert_eq!(scaled.contrast, 100.0, "Contrast clamped at max 100.0");
     assert_eq!(scaled.exposure, -5.0, "Exposure clamped at min -5.0");
     assert_eq!(scaled.highlights, 100.0, "Highlights clamped at max 100.0");
-    assert_eq!(scaled.sharpen_amount, 150.0, "Sharpening clamped at max 150.0");
-    assert_eq!(scaled.temperature, Some(50000.0), "Temperature clamped at max 50,000K");
+    assert_eq!(
+        scaled.sharpen_amount, 150.0,
+        "Sharpening clamped at max 150.0"
+    );
+    assert_eq!(
+        scaled.temperature,
+        Some(50000.0),
+        "Temperature clamped at max 50,000K"
+    );
 
     fixture.assert_integrity();
 }
@@ -389,7 +421,9 @@ fn test_t1_rec03_01_toml_roundtrip_serialization() {
     assert!(serialized.contains("exposure = -0.2"));
     assert!(serialized.contains("contrast = 15.0"));
 
-    let deserialized = PresetFormat::Toml.deserialize(&serialized, std::path::Path::new("dummy.toml")).unwrap();
+    let deserialized = PresetFormat::Toml
+        .deserialize(&serialized, std::path::Path::new("dummy.toml"))
+        .unwrap();
     assert_eq!(deserialized.metadata.id, preset.metadata.id);
     assert_eq!(deserialized.metadata.name, preset.metadata.name);
     assert_eq!(deserialized.recipe.exposure, preset.recipe.exposure);
@@ -425,7 +459,9 @@ fn test_t1_rec03_02_json_roundtrip_serialization() {
     assert!(serialized.contains("\"id\": \"teal-amber-style\""));
     assert!(serialized.contains("\"tint\": -10.0"));
 
-    let deserialized = PresetFormat::Json.deserialize(&serialized, std::path::Path::new("dummy.json")).unwrap();
+    let deserialized = PresetFormat::Json
+        .deserialize(&serialized, std::path::Path::new("dummy.json"))
+        .unwrap();
     assert_eq!(deserialized.metadata.id, preset.metadata.id);
     assert_eq!(deserialized.recipe.tint, preset.recipe.tint);
 
@@ -532,8 +568,14 @@ fn test_t1_rec03_05_store_delete_preset() {
     let store = PresetStore::with_default_builtins(tmp.path().to_path_buf()).unwrap();
 
     // Built-ins cannot be deleted
-    assert!(matches!(store.delete_preset("natural"), Err(StorageError::PermissionDenied(_))));
-    assert!(matches!(store.delete_preset("cinema"), Err(StorageError::PermissionDenied(_))));
+    assert!(matches!(
+        store.delete_preset("natural"),
+        Err(StorageError::PermissionDenied(_))
+    ));
+    assert!(matches!(
+        store.delete_preset("cinema"),
+        Err(StorageError::PermissionDenied(_))
+    ));
 
     // Save custom preset then delete it
     let p = PresetFile::new(
@@ -560,7 +602,10 @@ fn test_t1_rec03_05_store_delete_preset() {
     assert!(!path.exists());
 
     // Deleting again produces NotFound
-    assert!(matches!(store.delete_preset("temp-preset"), Err(StorageError::NotFound(_))));
+    assert!(matches!(
+        store.delete_preset("temp-preset"),
+        Err(StorageError::NotFound(_))
+    ));
 
     fixture.assert_integrity();
 }
@@ -574,7 +619,9 @@ fn test_t1_rec03_06_store_import_and_export() {
     let export_dir = tempdir().unwrap();
 
     // Export Cinema preset as JSON
-    let exported_path = store.export_preset("cinema", export_dir.path(), PresetFormat::Json).unwrap();
+    let exported_path = store
+        .export_preset("cinema", export_dir.path(), PresetFormat::Json)
+        .unwrap();
     assert!(exported_path.is_file());
     assert_eq!(exported_path.extension().unwrap(), "json");
 
@@ -585,7 +632,10 @@ fn test_t1_rec03_06_store_import_and_export() {
     // Import the exported file
     let imported = store2.import_preset(&exported_path).unwrap();
     assert_eq!(imported.recipe.exposure, -0.20);
-    assert!(!imported.metadata.is_builtin, "Imported presets must not claim built-in immunity");
+    assert!(
+        !imported.metadata.is_builtin,
+        "Imported presets must not claim built-in immunity"
+    );
 
     let loaded = store2.load_preset(&imported.metadata.id).unwrap();
     assert_eq!(loaded.exposure, -0.20);
@@ -600,19 +650,43 @@ fn test_t1_rec03_07_store_atomic_write_and_path_traversal() {
     let store = PresetStore::with_default_builtins(tmp.path().to_path_buf()).unwrap();
 
     // Path traversal rejection
-    assert!(matches!(store.load_preset("../windows/system32"), Err(StorageError::PathTraversal(_))));
-    assert!(matches!(store.load_preset("sub/dir/preset"), Err(StorageError::PathTraversal(_))));
-    assert!(matches!(store.load_preset("sub\\dir\\preset"), Err(StorageError::PathTraversal(_))));
+    assert!(matches!(
+        store.load_preset("../windows/system32"),
+        Err(StorageError::PathTraversal(_))
+    ));
+    assert!(matches!(
+        store.load_preset("sub/dir/preset"),
+        Err(StorageError::PathTraversal(_))
+    ));
+    assert!(matches!(
+        store.load_preset("sub\\dir\\preset"),
+        Err(StorageError::PathTraversal(_))
+    ));
 
     // Reserved Windows names
-    assert!(matches!(validate_identifier("CON"), Err(StorageError::InvalidIdentifier(_))));
-    assert!(matches!(validate_identifier("NUL"), Err(StorageError::InvalidIdentifier(_))));
-    assert!(matches!(validate_identifier("AUX"), Err(StorageError::InvalidIdentifier(_))));
-    assert!(matches!(validate_identifier("COM3"), Err(StorageError::InvalidIdentifier(_))));
+    assert!(matches!(
+        validate_identifier("CON"),
+        Err(StorageError::InvalidIdentifier(_))
+    ));
+    assert!(matches!(
+        validate_identifier("NUL"),
+        Err(StorageError::InvalidIdentifier(_))
+    ));
+    assert!(matches!(
+        validate_identifier("AUX"),
+        Err(StorageError::InvalidIdentifier(_))
+    ));
+    assert!(matches!(
+        validate_identifier("COM3"),
+        Err(StorageError::InvalidIdentifier(_))
+    ));
 
     // Built-in overwrite rejection
     let natural_file = store.load_preset_file("natural").unwrap();
-    assert!(matches!(store.save_preset(&natural_file, PresetFormat::Toml), Err(StorageError::PermissionDenied(_))));
+    assert!(matches!(
+        store.save_preset(&natural_file, PresetFormat::Toml),
+        Err(StorageError::PermissionDenied(_))
+    ));
 
     fixture.assert_integrity();
 }
@@ -688,7 +762,10 @@ fn test_t1_rec04_03_bw_high_contrast_preset() {
     assert_eq!(r.sharpen_amount, 25.0);
     assert_eq!(r.vignette, -15.0);
 
-    let bw_mix = r.bw_mix.as_ref().expect("B&W must have panchromatic channel weights");
+    let bw_mix = r
+        .bw_mix
+        .as_ref()
+        .expect("B&W must have panchromatic channel weights");
     assert_eq!(bw_mix.red, 25.0);
     assert_eq!(bw_mix.blue, -30.0, "Red filter / dark dramatic skies");
 
@@ -781,9 +858,27 @@ fn test_t1_rec05_02_native_preset_grouping() {
 
     let mut reg = NativePresetRegistry::default();
     reg.populate(vec![
-        McpPresetInfo { id: "p1".into(), name: "P1".into(), group: "Color".into(), builtin: true, favorite: false },
-        McpPresetInfo { id: "p2".into(), name: "P2".into(), group: "Color".into(), builtin: true, favorite: false },
-        McpPresetInfo { id: "p3".into(), name: "P3".into(), group: "B&W".into(), builtin: true, favorite: false },
+        McpPresetInfo {
+            id: "p1".into(),
+            name: "P1".into(),
+            group: "Color".into(),
+            builtin: true,
+            favorite: false,
+        },
+        McpPresetInfo {
+            id: "p2".into(),
+            name: "P2".into(),
+            group: "Color".into(),
+            builtin: true,
+            favorite: false,
+        },
+        McpPresetInfo {
+            id: "p3".into(),
+            name: "P3".into(),
+            group: "B&W".into(),
+            builtin: true,
+            favorite: false,
+        },
     ]);
 
     assert_eq!(reg.get_group("Color").len(), 2);
@@ -798,19 +893,20 @@ fn test_t1_rec05_03_native_preset_lookup_case_insensitive() {
     let fixture = TestFixture::new("rec05_preset_lookup");
 
     let mut reg = NativePresetRegistry::default();
-    reg.populate(vec![
-        McpPresetInfo {
-            id: "lc.teal-orange".into(),
-            name: "Teal & Orange".into(),
-            group: "Color".into(),
-            builtin: true,
-            favorite: true,
-        },
-    ]);
+    reg.populate(vec![McpPresetInfo {
+        id: "lc.teal-orange".into(),
+        name: "Teal & Orange".into(),
+        group: "Color".into(),
+        builtin: true,
+        favorite: true,
+    }]);
 
     assert!(reg.find_by_name("teal & orange").is_some());
     assert!(reg.find_by_name("TEAL & ORANGE").is_some());
-    assert_eq!(reg.find_by_name("Teal & Orange").unwrap().id, "lc.teal-orange");
+    assert_eq!(
+        reg.find_by_name("Teal & Orange").unwrap().id,
+        "lc.teal-orange"
+    );
 
     fixture.assert_integrity();
 }
@@ -828,7 +924,7 @@ fn test_t1_rec05_04_develop_bridge_recipe_to_settings() {
     // At 100% intensity: nominal addition clamped
     let merged = DevelopBridge::apply_recipe_to_settings(&base_settings, &recipe, 1.0);
     assert!((merged.light.exposure - (-0.10)).abs() < 1e-5); // 0.10 + (-0.20) = -0.10
-    assert!((merged.light.contrast - 20.0).abs() < 1e-5);   // 5.0 + 15.0 = 20.0
+    assert!((merged.light.contrast - 20.0).abs() < 1e-5); // 5.0 + 15.0 = 20.0
     assert_eq!(merged.light.highlights, -25.0);
 
     // Extract recipe back from settings
@@ -849,7 +945,10 @@ fn test_t1_rec05_05_preset_application_strategies() {
         amount_pct: 100.0,
     };
     match &strat1 {
-        PresetApplicationStrategy::ServerNative { preset_id, amount_pct } => {
+        PresetApplicationStrategy::ServerNative {
+            preset_id,
+            amount_pct,
+        } => {
             assert_eq!(preset_id, "lc.cinematic");
             assert_eq!(*amount_pct, 100.0);
         }
@@ -871,11 +970,18 @@ fn test_t1_rec05_05_preset_application_strategies() {
     let strat3 = PresetApplicationStrategy::HybridMerge {
         native_preset_id: "lc.cinematic".into(),
         native_amount: 100.0,
-        recipe_overlay: Recipe { exposure: 0.20, ..Default::default() },
+        recipe_overlay: Recipe {
+            exposure: 0.20,
+            ..Default::default()
+        },
         overlay_intensity: 1.0,
     };
     match &strat3 {
-        PresetApplicationStrategy::HybridMerge { native_preset_id, recipe_overlay, .. } => {
+        PresetApplicationStrategy::HybridMerge {
+            native_preset_id,
+            recipe_overlay,
+            ..
+        } => {
             assert_eq!(native_preset_id, "lc.cinematic");
             assert_eq!(recipe_overlay.exposure, 0.20);
         }

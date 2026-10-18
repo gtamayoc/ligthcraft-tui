@@ -48,9 +48,14 @@ use common::TestFixture;
 async fn create_mock_app() -> AppController {
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     // Populate mock items if DRAW was empty or only had few files
     if app.items.len() < 5 {
@@ -255,9 +260,12 @@ async fn test_adv_m3_01_02_rapid_mode_toggling_with_interleaved_events_and_full_
         app.handle_event(AppEvent::Tick).await.unwrap();
 
         // 5. Interleave Status message
-        app.handle_event(AppEvent::StatusMessage(format!("Heartbeat iteration {}", i)))
-            .await
-            .unwrap();
+        app.handle_event(AppEvent::StatusMessage(format!(
+            "Heartbeat iteration {}",
+            i
+        )))
+        .await
+        .unwrap();
 
         // 6. Execute full Ratatui render pass to catch any buffer desync or layout panics
         terminal.draw(|frame| app.render(frame)).unwrap();
@@ -415,8 +423,20 @@ fn test_adv_m3_02_03_extreme_zoom_levels_up_to_10x_and_beyond() {
             assert!(ch >= 1, "crop_h must be at least 1 at zoom {}", z);
 
             // Invariant 2: Dimensions must not exceed image size
-            assert!(cw <= img_w, "crop_w ({}) > img_w ({}) at zoom {}", cw, img_w, z);
-            assert!(ch <= img_h, "crop_h ({}) > img_h ({}) at zoom {}", ch, img_h, z);
+            assert!(
+                cw <= img_w,
+                "crop_w ({}) > img_w ({}) at zoom {}",
+                cw,
+                img_w,
+                z
+            );
+            assert!(
+                ch <= img_h,
+                "crop_h ({}) > img_h ({}) at zoom {}",
+                ch,
+                img_h,
+                z
+            );
 
             // Invariant 3: Crop box must strictly lie within [0, img_w] and [0, img_h]
             assert!(
@@ -437,9 +457,18 @@ fn test_adv_m3_02_03_extreme_zoom_levels_up_to_10x_and_beyond() {
 fn test_adv_m3_02_04_physical_image_slicing_stress_never_panics() {
     // Construct diverse dynamic images
     let images = vec![
-        ("Landscape", DynamicImage::ImageRgba8(RgbaImage::new(1200, 800))),
-        ("Portrait", DynamicImage::ImageRgba8(RgbaImage::new(800, 1200))),
-        ("Panorama", DynamicImage::ImageRgba8(RgbaImage::new(3000, 400))),
+        (
+            "Landscape",
+            DynamicImage::ImageRgba8(RgbaImage::new(1200, 800)),
+        ),
+        (
+            "Portrait",
+            DynamicImage::ImageRgba8(RgbaImage::new(800, 1200)),
+        ),
+        (
+            "Panorama",
+            DynamicImage::ImageRgba8(RgbaImage::new(3000, 400)),
+        ),
         ("Square", DynamicImage::ImageRgba8(RgbaImage::new(512, 512))),
         ("Small", DynamicImage::ImageRgba8(RgbaImage::new(64, 64))),
         ("1x1", DynamicImage::ImageRgba8(RgbaImage::new(1, 1))),
@@ -628,7 +657,12 @@ fn test_adv_m3_04_01_all_black_image_completes_without_divide_by_zero() {
     let sparks = hist.sparklines();
     assert_eq!(sparks.len(), 4);
     for s in &sparks {
-        assert!(s.contains("Lum: [") || s.contains("Red: [") || s.contains("Grn: [") || s.contains("Blu: ["));
+        assert!(
+            s.contains("Lum: [")
+                || s.contains("Red: [")
+                || s.contains("Grn: [")
+                || s.contains("Blu: [")
+        );
         assert!(!s.contains("NaN") && !s.contains("inf"));
     }
 }
@@ -636,7 +670,8 @@ fn test_adv_m3_04_01_all_black_image_completes_without_divide_by_zero() {
 #[test]
 fn test_adv_m3_04_02_all_white_image_saturation_resilience() {
     // 500x500 all-white image
-    let white = DynamicImage::ImageRgba8(RgbaImage::from_pixel(500, 500, Rgba([255, 255, 255, 255])));
+    let white =
+        DynamicImage::ImageRgba8(RgbaImage::from_pixel(500, 500, Rgba([255, 255, 255, 255])));
 
     let hist = HistogramData::from_image(&white);
 
@@ -653,7 +688,10 @@ fn test_adv_m3_04_02_all_white_image_saturation_resilience() {
     assert_eq!(sparks.len(), 4);
     for s in &sparks {
         // Bin 31 should show full height spark character '█'
-        assert!(s.contains('█'), "White image sparkline must contain full bar '█'");
+        assert!(
+            s.contains('█'),
+            "White image sparkline must contain full bar '█'"
+        );
     }
 }
 
@@ -678,7 +716,8 @@ fn test_adv_m3_04_03_fully_transparent_and_alpha_variations() {
 fn test_adv_m3_04_04_tiny_1x1_and_extreme_aspect_ratios() {
     // 1x1 image
     let tiny_black = DynamicImage::ImageRgba8(RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 255])));
-    let tiny_white = DynamicImage::ImageRgba8(RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])));
+    let tiny_white =
+        DynamicImage::ImageRgba8(RgbaImage::from_pixel(1, 1, Rgba([255, 255, 255, 255])));
     let tiny_red = DynamicImage::ImageRgba8(RgbaImage::from_pixel(1, 1, Rgba([255, 0, 0, 255])));
 
     for tiny in &[tiny_black, tiny_white, tiny_red] {
@@ -689,13 +728,15 @@ fn test_adv_m3_04_04_tiny_1x1_and_extreme_aspect_ratios() {
     }
 
     // 5000x1 horizontal line
-    let h_line = DynamicImage::ImageRgba8(RgbaImage::from_pixel(5000, 1, Rgba([128, 128, 128, 255])));
+    let h_line =
+        DynamicImage::ImageRgba8(RgbaImage::from_pixel(5000, 1, Rgba([128, 128, 128, 255])));
     let hist_h = HistogramData::from_image(&h_line);
     assert!(hist_h.max_count >= 1);
     assert_eq!(hist_h.sparklines().len(), 4);
 
     // 1x5000 vertical column
-    let v_col = DynamicImage::ImageRgba8(RgbaImage::from_pixel(1, 5000, Rgba([128, 128, 128, 255])));
+    let v_col =
+        DynamicImage::ImageRgba8(RgbaImage::from_pixel(1, 5000, Rgba([128, 128, 128, 255])));
     let hist_v = HistogramData::from_image(&v_col);
     assert!(hist_v.max_count >= 1);
     assert_eq!(hist_v.sparklines().len(), 4);
@@ -803,11 +844,11 @@ async fn test_adv_m3_05_02_ratatui_render_sweep_all_view_modes_and_terminal_size
     ];
 
     let terminal_sizes = [
-        (60, 20),   // Below minimum (alert overlay)
-        (80, 24),   // Exactly minimum
-        (120, 40),  // Standard desktop
-        (160, 50),  // Ultrawide
-        (240, 70),  // Massive display
+        (60, 20),  // Below minimum (alert overlay)
+        (80, 24),  // Exactly minimum
+        (120, 40), // Standard desktop
+        (160, 50), // Ultrawide
+        (240, 70), // Massive display
     ];
 
     for (w, h) in terminal_sizes {

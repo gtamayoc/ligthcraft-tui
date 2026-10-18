@@ -33,9 +33,8 @@ use lightcraft_tui::engine::presets::BuiltinPreset;
 use lightcraft_tui::error::IntegrityViolationError;
 use lightcraft_tui::export::{
     sanitize_filename_component, validate_export_path, BitDepth, CollisionPolicy,
-    CollisionResolution, CollisionResolver, ExportError, ExportJob, ExportOutcome,
-    ExportPipeline, ExportProfile, NamingTemplate, OutputFormat,
-    ScalingProfile,
+    CollisionResolution, CollisionResolver, ExportError, ExportJob, ExportOutcome, ExportPipeline,
+    ExportProfile, NamingTemplate, OutputFormat, ScalingProfile,
 };
 use lightcraft_tui::mcp::integrity::{find_draw_dir, verify_cr3_baseline, IntegrityEngine};
 
@@ -267,10 +266,7 @@ async fn test_adv_exp02_path_traversal_sandbox_escape_zero_writes() {
 fn test_adv_exp03_illegal_win32_chars_sanitization() {
     // Torture strings containing every illegal Win32 character
     let torture_inputs = [
-        (
-            r#"Teal/Orange:*?"<>|Ultra"#,
-            "Teal_Orange_______Ultra",
-        ),
+        (r#"Teal/Orange:*?"<>|Ultra"#, "Teal_Orange_______Ultra"),
         (
             "Colon:Asterisk*Question?Quote\"Less<Greater>Pipe|Slash/Backslash\\",
             "Colon_Asterisk_Question_Quote_Less_Greater_Pipe_Slash_Backslash_",
@@ -279,10 +275,7 @@ fn test_adv_exp03_illegal_win32_chars_sanitization() {
             "Control\x01Chars\x02In\x1fFilename",
             "Control_Chars_In_Filename",
         ),
-        (
-            r#":*?"<>|/\/:*?"<>|"#,
-            "_________________",
-        ),
+        (r#":*?"<>|/\/:*?"<>|"#, "_________________"),
     ];
 
     for (raw_input, expected_sanitized) in torture_inputs {
@@ -325,7 +318,10 @@ async fn test_adv_exp04_filename_torture_clean_write_no_os_error() {
 
     // Preset names and templates loaded with illegal characters
     let torture_scenarios = [
-        ("Teal/Orange:Style*Test?\"<Angle>|Pipe", "{name}__{preset}.{ext}"),
+        (
+            "Teal/Orange:Style*Test?\"<Angle>|Pipe",
+            "{name}__{preset}.{ext}",
+        ),
         ("Control\x07Bell\x08Back", "{preset}__{seq:2}.{ext}"),
         (r#"Path\Traversal/Like:Tokens"#, "{name}__{preset}.{ext}"),
     ];
@@ -352,7 +348,12 @@ async fn test_adv_exp04_filename_torture_clean_write_no_os_error() {
             res.err()
         );
 
-        if let ExportOutcome::Success { output_path, bytes_written, .. } = res.unwrap() {
+        if let ExportOutcome::Success {
+            output_path,
+            bytes_written,
+            ..
+        } = res.unwrap()
+        {
             assert!(output_path.exists(), "Target file must exist on disk");
             assert!(bytes_written > 0, "Written bytes must be > 0");
 
@@ -385,9 +386,8 @@ async fn test_adv_exp05_reserved_device_names_torture() {
 
     // Full list of Win32 reserved device names
     let reserved_names = [
-        "CON", "PRN", "AUX", "NUL",
-        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
         // Lowercase and mixed-case variants
         "con", "prn", "aux", "nul", "com1", "lpt9",
     ];
@@ -425,7 +425,12 @@ async fn test_adv_exp05_reserved_device_names_torture() {
             res.err()
         );
 
-        if let ExportOutcome::Success { output_path, bytes_written, .. } = res.unwrap() {
+        if let ExportOutcome::Success {
+            output_path,
+            bytes_written,
+            ..
+        } = res.unwrap()
+        {
             assert!(output_path.exists());
             assert!(bytes_written > 0);
             let file_name = output_path.file_name().unwrap().to_string_lossy();
@@ -495,7 +500,12 @@ async fn test_adv_exp06_trailing_dots_and_spaces_torture() {
             res.err()
         );
 
-        if let ExportOutcome::Success { output_path, bytes_written, .. } = res.unwrap() {
+        if let ExportOutcome::Success {
+            output_path,
+            bytes_written,
+            ..
+        } = res.unwrap()
+        {
             assert!(output_path.exists());
             assert!(bytes_written > 0);
             let filename = output_path.file_name().unwrap().to_string_lossy();
@@ -523,16 +533,26 @@ fn test_adv_exp07_cascading_100_plus_collisions() {
 
     // 1. Pre-create 120 colliding files directly on the filesystem
     let base_file = tmp.path().join(format!("{}.{}", file_stem, ext));
-    File::create(&base_file).unwrap().write_all(b"BASE").unwrap();
+    File::create(&base_file)
+        .unwrap()
+        .write_all(b"BASE")
+        .unwrap();
 
     for i in 1..=120 {
         let collision_file = tmp.path().join(format!("{}_{}.{}", file_stem, i, ext));
-        File::create(&collision_file).unwrap().write_all(b"COLLISION").unwrap();
+        File::create(&collision_file)
+            .unwrap()
+            .write_all(b"COLLISION")
+            .unwrap();
     }
 
     // 2. Request resolution for the 121st collision
     let res = resolver.resolve_path(tmp.path(), file_stem, ext, CollisionPolicy::Rename);
-    assert!(res.is_ok(), "Resolver failed at 121st collision: {:?}", res.err());
+    assert!(
+        res.is_ok(),
+        "Resolver failed at 121st collision: {:?}",
+        res.err()
+    );
 
     match res.unwrap() {
         CollisionResolution::Write(path) => {
@@ -654,9 +674,7 @@ async fn test_adv_exp09_concurrent_pipeline_export_stress() {
             collision_policy: CollisionPolicy::Rename,
         };
 
-        let handle = tokio::spawn(async move {
-            pipeline_clone.execute_export(None, &job).await
-        });
+        let handle = tokio::spawn(async move { pipeline_clone.execute_export(None, &job).await });
         handles.push(handle);
     }
 
@@ -665,7 +683,11 @@ async fn test_adv_exp09_concurrent_pipeline_export_stress() {
         let res = handle.await.expect("Tokio export worker panicked");
         let outcome = res.expect("Pipeline export failed under concurrency");
         match outcome {
-            ExportOutcome::Success { output_path, bytes_written, .. } => {
+            ExportOutcome::Success {
+                output_path,
+                bytes_written,
+                ..
+            } => {
                 assert!(output_path.exists());
                 assert!(bytes_written > 0);
                 success_paths.push(output_path);
@@ -688,7 +710,12 @@ async fn test_adv_exp09_concurrent_pipeline_export_stress() {
     // Verify all 20 files on disk are valid, non-corrupted JPEGs
     for p in &success_paths {
         let bytes = fs::read(p).expect("Failed to read created export file");
-        assert_eq!(&bytes[0..2], &[0xFF, 0xD8], "File {} is corrupted", p.display());
+        assert_eq!(
+            &bytes[0..2],
+            &[0xFF, 0xD8],
+            "File {} is corrupted",
+            p.display()
+        );
     }
 }
 
@@ -752,7 +779,9 @@ async fn test_adv_exp10_export_into_draw_directory_unconditional_veto() {
         );
 
         match res.unwrap_err() {
-            ExportError::Integrity(IntegrityViolationError::SourceDirectoryContamination { .. }) => {
+            ExportError::Integrity(IntegrityViolationError::SourceDirectoryContamination {
+                ..
+            }) => {
                 // Expected exact error
             }
             other => {
@@ -814,7 +843,10 @@ fn test_adv_exp11_export_targeting_cr3_extension_unconditional_veto() {
         let engine = IntegrityEngine::new(vec![draw_dir.clone()], true);
         let veto_res = engine.check_extension_veto(target);
         assert!(
-            matches!(veto_res, Err(IntegrityViolationError::ProhibitedTargetExtension { .. })),
+            matches!(
+                veto_res,
+                Err(IntegrityViolationError::ProhibitedTargetExtension { .. })
+            ),
             "IntegrityEngine must veto target: {:?}",
             target
         );
@@ -833,9 +865,7 @@ fn test_adv_exp12_canon_cr3_master_immutability_baseline() {
                 assert!(
                     record.is_valid,
                     "CR3 master file {} corrupted! Expected sha256={}, actual={}",
-                    record.filename,
-                    record.expected_sha256,
-                    record.actual_sha256
+                    record.filename, record.expected_sha256, record.actual_sha256
                 );
             }
         }
@@ -846,7 +876,11 @@ fn test_adv_exp12_canon_cr3_master_immutability_baseline() {
                 if path.is_file() {
                     let (hash, size) = lightcraft_tui::mcp::integrity::compute_file_sha256(&path)
                         .expect("Failed reading present file");
-                    assert_eq!(size, entry.expected_size, "Size mismatch for {}", entry.filename);
+                    assert_eq!(
+                        size, entry.expected_size,
+                        "Size mismatch for {}",
+                        entry.filename
+                    );
                     assert!(
                         hash.eq_ignore_ascii_case(entry.expected_sha256),
                         "SHA-256 mismatch for {}",
@@ -856,7 +890,10 @@ fn test_adv_exp12_canon_cr3_master_immutability_baseline() {
                 }
             }
             if !checked_any {
-                panic!("Master CR3 baseline cryptographic verification failed: {}", missing_err);
+                panic!(
+                    "Master CR3 baseline cryptographic verification failed: {}",
+                    missing_err
+                );
             }
         }
     }

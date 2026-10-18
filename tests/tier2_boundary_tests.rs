@@ -25,7 +25,8 @@ use mcp::tools::{ExportParams, ImportMode, ImportParams};
 fn create_sample_file(dir: &Path, name: &str, content: &[u8]) -> PathBuf {
     let path = dir.join(name);
     let mut file = File::create(&path).expect("failed to create sample file");
-    file.write_all(content).expect("failed to write sample content");
+    file.write_all(content)
+        .expect("failed to write sample content");
     file.flush().expect("failed to flush sample file");
     path
 }
@@ -38,7 +39,10 @@ fn create_sample_file(dir: &Path, name: &str, content: &[u8]) -> PathBuf {
 fn test_cr3_baseline_hashes_all_match() {
     let draw_dir = find_draw_dir();
     if !draw_dir.exists() {
-        eprintln!("Notice: DRAW directory not found at {}. Skipping baseline verification in CI runner.", draw_dir.display());
+        eprintln!(
+            "Notice: DRAW directory not found at {}. Skipping baseline verification in CI runner.",
+            draw_dir.display()
+        );
         return;
     }
 
@@ -65,7 +69,11 @@ fn test_cr3_baseline_hashes_all_match() {
                 if path.is_file() {
                     let (hash, size) = lightcraft_tui::mcp::integrity::compute_file_sha256(&path)
                         .expect("Failed reading present file");
-                    assert_eq!(size, entry.expected_size, "Size mismatch for {}", entry.filename);
+                    assert_eq!(
+                        size, entry.expected_size,
+                        "Size mismatch for {}",
+                        entry.filename
+                    );
                     assert!(
                         hash.eq_ignore_ascii_case(entry.expected_sha256),
                         "SHA-256 mismatch for {}",
@@ -88,7 +96,11 @@ fn test_cr3_baseline_hashes_all_match() {
 #[test]
 fn test_tamper_detection_single_bit_flip() {
     let temp = tempdir().expect("tempdir");
-    let file_path = create_sample_file(temp.path(), "sample.bin", b"ABCDEF0123456789ImmutableSourceData");
+    let file_path = create_sample_file(
+        temp.path(),
+        "sample.bin",
+        b"ABCDEF0123456789ImmutableSourceData",
+    );
 
     let engine = IntegrityEngine::new(vec![temp.path().to_path_buf()], true);
     let manifest = engine.capture_preflight().expect("capture preflight");
@@ -121,19 +133,27 @@ fn test_tamper_detection_single_bit_flip() {
     let result = engine.verify_manifest(&manifest);
     assert!(result.is_err(), "Engine must detect single-bit flip");
     match result.unwrap_err() {
-        IntegrityViolationError::HashMismatch { path, expected, actual } => {
+        IntegrityViolationError::HashMismatch {
+            path,
+            expected,
+            actual,
+        } => {
             assert_eq!(path, file_path.canonicalize().unwrap_or(file_path));
             assert_ne!(expected, actual);
         }
         other => panic!("Expected HashMismatch, got {:?}", other),
     }
-    assert!(engine.is_poisoned(), "Engine must be poisoned after tamper detection");
+    assert!(
+        engine.is_poisoned(),
+        "Engine must be poisoned after tamper detection"
+    );
 }
 
 #[test]
 fn test_tamper_detection_truncated_file() {
     let temp = tempdir().expect("tempdir");
-    let file_path = create_sample_file(temp.path(), "sample.bin", b"012345678901234567890123456789");
+    let file_path =
+        create_sample_file(temp.path(), "sample.bin", b"012345678901234567890123456789");
 
     let engine = IntegrityEngine::new(vec![temp.path().to_path_buf()], true);
     let manifest = engine.capture_preflight().expect("capture preflight");
@@ -151,13 +171,20 @@ fn test_tamper_detection_truncated_file() {
     let result = engine.verify_manifest(&manifest);
     assert!(result.is_err(), "Engine must detect file truncation");
     match result.unwrap_err() {
-        IntegrityViolationError::SizeMismatch { expected_bytes, actual_bytes, .. } => {
+        IntegrityViolationError::SizeMismatch {
+            expected_bytes,
+            actual_bytes,
+            ..
+        } => {
             assert_eq!(expected_bytes, 30);
             assert_eq!(actual_bytes, 20);
         }
         other => panic!("Expected SizeMismatch, got {:?}", other),
     }
-    assert!(engine.is_poisoned(), "Engine must be poisoned after truncation");
+    assert!(
+        engine.is_poisoned(),
+        "Engine must be poisoned after truncation"
+    );
 }
 
 #[test]
@@ -199,14 +226,21 @@ fn test_tamper_detection_timestamp_modification_stress() {
         file_path.display()
     );
     match result.unwrap_err() {
-        IntegrityViolationError::TimestampMismatch { path, expected, actual } => {
+        IntegrityViolationError::TimestampMismatch {
+            path,
+            expected,
+            actual,
+        } => {
             assert_eq!(path, canonical);
             assert_eq!(expected, initial_time);
             assert_eq!(actual, new_meta.modified().unwrap());
         }
         other => panic!("Expected TimestampMismatch, got {:?}", other),
     }
-    assert!(engine.is_poisoned(), "Engine must be poisoned after timestamp tamper detection");
+    assert!(
+        engine.is_poisoned(),
+        "Engine must be poisoned after timestamp tamper detection"
+    );
 }
 
 // ============================================================================
@@ -227,13 +261,19 @@ fn test_integrity_engine_import_mode_validation() {
     let engine_move = IntegrityEngine::new(vec![draw_dir.clone()], true);
     let res_move = engine_move.validate_import_mode(Some("move"));
     assert!(res_move.is_err(), "Mode 'move' must be rejected");
-    assert!(engine_move.is_poisoned(), "Engine must be poisoned after 'move'");
+    assert!(
+        engine_move.is_poisoned(),
+        "Engine must be poisoned after 'move'"
+    );
 
     // Prohibited mode "copy"
     let engine_copy = IntegrityEngine::new(vec![draw_dir.clone()], true);
     let res_copy = engine_copy.validate_import_mode(Some("copy"));
     assert!(res_copy.is_err(), "Mode 'copy' must be rejected");
-    assert!(engine_copy.is_poisoned(), "Engine must be poisoned after 'copy'");
+    assert!(
+        engine_copy.is_poisoned(),
+        "Engine must be poisoned after 'copy'"
+    );
 
     // Arbitrary invalid mode
     let engine_junk = IntegrityEngine::new(vec![draw_dir.clone()], true);
@@ -261,7 +301,8 @@ async fn test_mcp_client_import_mode_move_rejection_at_client_boundary() {
     };
 
     // Contract requirement: attempts to invoke import with mode 'move' must be strictly rejected BEFORE hitting MCP server
-    let call_res: Result<serde_json::Value, McpError> = client.call_tool("import", move_params).await;
+    let call_res: Result<serde_json::Value, McpError> =
+        client.call_tool("import", move_params).await;
     assert!(
         call_res.is_err(),
         "CRITICAL DEFECT: McpClient dispatched 'import' with mode: 'move' without pre-flight validation!"
@@ -292,7 +333,12 @@ fn test_destination_path_sandboxing_draw_subpaths() {
     assert!(engine.validate_destination_path(&target3).is_err());
 
     // 4. Valid target outside DRAW
-    let valid_target = draw_dir.parent().unwrap().join("target").join("test_exports").join("variant.jpg");
+    let valid_target = draw_dir
+        .parent()
+        .unwrap()
+        .join("target")
+        .join("test_exports")
+        .join("variant.jpg");
     assert!(engine.validate_destination_path(&valid_target).is_ok());
 }
 

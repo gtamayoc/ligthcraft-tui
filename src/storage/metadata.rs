@@ -7,8 +7,8 @@ use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
 
-use exif::{Field, Reader, Tag, Value};
 use crate::mcp::tools::PhotoInfo;
+use exif::{Field, Reader, Tag, Value};
 
 /// Detailed shooting and photographic EXIF metadata.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -60,13 +60,15 @@ impl PhotoMetadata {
                         .or_else(|| val_str.as_deref().and_then(|s| s.parse::<f32>().ok()));
                 }
                 "ExposureTime" | "ShutterSpeedValue" => {
-                    meta.shutter_speed = val_str.or_else(|| val_num.map(|n| {
-                        if n < 1.0 && n > 0.0 {
-                            format!("1/{}s", (1.0 / n).round() as u64)
-                        } else {
-                            format!("{:.1}s", n)
-                        }
-                    }));
+                    meta.shutter_speed = val_str.or_else(|| {
+                        val_num.map(|n| {
+                            if n < 1.0 && n > 0.0 {
+                                format!("1/{}s", (1.0 / n).round() as u64)
+                            } else {
+                                format!("{:.1}s", n)
+                            }
+                        })
+                    });
                 }
                 "ISOSpeedRatings" | "PhotographicSensitivity" => {
                     meta.iso = val_u64
@@ -79,11 +81,13 @@ impl PhotoMetadata {
                         });
                 }
                 "FocalLength" => {
-                    meta.focal_length_mm = val_num
-                        .map(|n| n as f32)
-                        .or_else(|| val_str.as_deref().and_then(|s| {
-                            s.split(' ').next().and_then(|part| part.parse::<f32>().ok())
-                        }));
+                    meta.focal_length_mm = val_num.map(|n| n as f32).or_else(|| {
+                        val_str.as_deref().and_then(|s| {
+                            s.split(' ')
+                                .next()
+                                .and_then(|part| part.parse::<f32>().ok())
+                        })
+                    });
                 }
                 "Model" if meta.camera_model.is_none() => {
                     meta.camera_model = val_str;
@@ -219,13 +223,31 @@ pub fn read_native_metadata(path: &Path) -> PhotoMetadata {
             for f in exif.fields() {
                 match f.tag {
                     Tag::Make => {
-                        meta.camera_make = Some(f.display_value().to_string().trim_matches('"').trim().to_string());
+                        meta.camera_make = Some(
+                            f.display_value()
+                                .to_string()
+                                .trim_matches('"')
+                                .trim()
+                                .to_string(),
+                        );
                     }
                     Tag::Model => {
-                        meta.camera_model = Some(f.display_value().to_string().trim_matches('"').trim().to_string());
+                        meta.camera_model = Some(
+                            f.display_value()
+                                .to_string()
+                                .trim_matches('"')
+                                .trim()
+                                .to_string(),
+                        );
                     }
                     Tag::LensModel => {
-                        meta.lens_model = Some(f.display_value().to_string().trim_matches('"').trim().to_string());
+                        meta.lens_model = Some(
+                            f.display_value()
+                                .to_string()
+                                .trim_matches('"')
+                                .trim()
+                                .to_string(),
+                        );
                     }
                     Tag::FocalLength => {
                         if let Some(fl) = parse_rational_f32(&f.value) {
@@ -251,14 +273,32 @@ pub fn read_native_metadata(path: &Path) -> PhotoMetadata {
                         }
                     }
                     Tag::MeteringMode => {
-                        meta.metering_mode = Some(f.display_value().to_string().trim_matches('"').trim().to_string());
+                        meta.metering_mode = Some(
+                            f.display_value()
+                                .to_string()
+                                .trim_matches('"')
+                                .trim()
+                                .to_string(),
+                        );
                     }
                     Tag::WhiteBalance => {
-                        meta.white_balance = Some(f.display_value().to_string().trim_matches('"').trim().to_string());
+                        meta.white_balance = Some(
+                            f.display_value()
+                                .to_string()
+                                .trim_matches('"')
+                                .trim()
+                                .to_string(),
+                        );
                     }
                     Tag::DateTimeOriginal | Tag::DateTime => {
                         if meta.capture_time.is_none() {
-                            meta.capture_time = Some(f.display_value().to_string().trim_matches('"').trim().to_string());
+                            meta.capture_time = Some(
+                                f.display_value()
+                                    .to_string()
+                                    .trim_matches('"')
+                                    .trim()
+                                    .to_string(),
+                            );
                         }
                     }
                     Tag::PixelXDimension => {

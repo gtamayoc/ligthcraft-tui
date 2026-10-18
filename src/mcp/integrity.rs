@@ -240,7 +240,13 @@ impl IntegrityEngine {
         }
 
         Ok(SourceManifest {
-            session_id: format!("mcp_session_{}", SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_millis()),
+            session_id: format!(
+                "mcp_session_{}",
+                SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis()
+            ),
             created_at: SystemTime::now(),
             records,
         })
@@ -258,7 +264,8 @@ impl IntegrityEngine {
             if path.is_file() {
                 let canonical = path.canonicalize().unwrap_or_else(|_| path.clone());
                 let meta = std::fs::metadata(&path).map_err(IntegrityViolationError::Io)?;
-                let (sha256_hex, size_bytes) = compute_file_sha256(&path).map_err(IntegrityViolationError::Io)?;
+                let (sha256_hex, size_bytes) =
+                    compute_file_sha256(&path).map_err(IntegrityViolationError::Io)?;
                 let filename = path
                     .file_name()
                     .and_then(|n| n.to_str())
@@ -315,7 +322,10 @@ impl IntegrityEngine {
     }
 
     /// Re-hash and verify that all source files in the manifest remain 100% byte-for-byte identical.
-    pub fn verify_manifest(&self, manifest: &SourceManifest) -> Result<(), IntegrityViolationError> {
+    pub fn verify_manifest(
+        &self,
+        manifest: &SourceManifest,
+    ) -> Result<(), IntegrityViolationError> {
         let tolerance = if self.strict_mode {
             Duration::ZERO
         } else {
@@ -354,9 +364,14 @@ impl IntegrityEngine {
             // Timestamp modification check
             let current_mtime = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
             let mtime_diff = if current_mtime >= record.modified_time {
-                current_mtime.duration_since(record.modified_time).unwrap_or_default()
+                current_mtime
+                    .duration_since(record.modified_time)
+                    .unwrap_or_default()
             } else {
-                record.modified_time.duration_since(current_mtime).unwrap_or_default()
+                record
+                    .modified_time
+                    .duration_since(current_mtime)
+                    .unwrap_or_default()
             };
 
             if mtime_diff > tolerance {
@@ -368,7 +383,8 @@ impl IntegrityEngine {
                 });
             }
 
-            let (current_hash, _) = compute_file_sha256(path).map_err(IntegrityViolationError::Io)?;
+            let (current_hash, _) =
+                compute_file_sha256(path).map_err(IntegrityViolationError::Io)?;
             if !current_hash.eq_ignore_ascii_case(&record.sha256_hex) {
                 self.poison();
                 return Err(IntegrityViolationError::HashMismatch {
@@ -397,7 +413,10 @@ impl IntegrityEngine {
 
     /// Validate that an export or rendered photo target path does not lie inside any source folder,
     /// contains no lexical path traversal sequences ('..'), and does not target prohibited .CR3 formats.
-    pub fn validate_destination_path(&self, target_path: &Path) -> Result<PathBuf, IntegrityViolationError> {
+    pub fn validate_destination_path(
+        &self,
+        target_path: &Path,
+    ) -> Result<PathBuf, IntegrityViolationError> {
         // 1. Lexical parent traversal check before any filesystem access
         for comp in target_path.components() {
             if matches!(comp, std::path::Component::ParentDir) {
@@ -409,8 +428,11 @@ impl IntegrityEngine {
         }
 
         let path_str = target_path.to_string_lossy();
-        if path_str.contains("..") || path_str.contains("../") || path_str.contains("..\\")
-            || path_str.contains("%2e%2e") || path_str.contains("%2E%2E")
+        if path_str.contains("..")
+            || path_str.contains("../")
+            || path_str.contains("..\\")
+            || path_str.contains("%2e%2e")
+            || path_str.contains("%2E%2E")
         {
             self.poison();
             return Err(IntegrityViolationError::PathTraversal {
@@ -484,39 +506,39 @@ impl IntegrityEngine {
     /// Normalizes path for cross-platform comparison, resolving ancestors for non-existent files
     /// and stripping Windows verbatim prefixes (\\?\).
     pub fn normalize_path(p: &Path) -> PathBuf {
-    let abs = if p.is_relative() {
-        if let Ok(cwd) = std::env::current_dir() {
-            cwd.join(p)
+        let abs = if p.is_relative() {
+            if let Ok(cwd) = std::env::current_dir() {
+                cwd.join(p)
+            } else {
+                p.to_path_buf()
+            }
         } else {
             p.to_path_buf()
-        }
-    } else {
-        p.to_path_buf()
-    };
+        };
 
-    let can = if let Ok(c) = abs.canonicalize() {
-        c
-    } else if let Some(parent) = abs.parent() {
-        if let Ok(c_parent) = parent.canonicalize() {
-            if let Some(file_name) = abs.file_name() {
-                c_parent.join(file_name)
+        let can = if let Ok(c) = abs.canonicalize() {
+            c
+        } else if let Some(parent) = abs.parent() {
+            if let Ok(c_parent) = parent.canonicalize() {
+                if let Some(file_name) = abs.file_name() {
+                    c_parent.join(file_name)
+                } else {
+                    c_parent
+                }
             } else {
-                c_parent
+                abs
             }
         } else {
             abs
-        }
-    } else {
-        abs
-    };
+        };
 
-    let s = can.to_string_lossy();
-    if let Some(stripped) = s.strip_prefix(r"\\?\") {
-        PathBuf::from(stripped)
-    } else {
-        can
+        let s = can.to_string_lossy();
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            PathBuf::from(stripped)
+        } else {
+            can
+        }
     }
-}
 
     /// Audit a source directory to verify no unexpected sidecars (*.xmp) or temporary files were written.
     pub fn audit_source_directory(
@@ -614,8 +636,13 @@ mod tests {
                 for entry in CR3_BASELINE {
                     let path = draw_dir.join(entry.filename);
                     if path.exists() {
-                        let (hash, size) = compute_file_sha256(&path).expect("Failed reading present file");
-                        assert_eq!(size, entry.expected_size, "Size mismatch for {}", entry.filename);
+                        let (hash, size) =
+                            compute_file_sha256(&path).expect("Failed reading present file");
+                        assert_eq!(
+                            size, entry.expected_size,
+                            "Size mismatch for {}",
+                            entry.filename
+                        );
                         assert!(
                             hash.eq_ignore_ascii_case(entry.expected_sha256),
                             "SHA-256 mismatch for {}",
@@ -625,7 +652,10 @@ mod tests {
                     }
                 }
                 if !checked_any {
-                    eprintln!("Notice: No sample CR3 files present in DRAW/ ({})", missing_err);
+                    eprintln!(
+                        "Notice: No sample CR3 files present in DRAW/ ({})",
+                        missing_err
+                    );
                 }
             }
         }
@@ -668,4 +698,3 @@ mod tests {
         ));
     }
 }
-

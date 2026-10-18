@@ -47,8 +47,14 @@ impl AppLayout {
     pub const MIN_WIDTH: u16 = 60;
     pub const MIN_HEIGHT: u16 = 20;
 
-    /// Compute responsive pane rects for given terminal bounds.
+    /// Compute responsive pane rects for given terminal bounds, maintaining default header height.
     pub fn compute(area: Rect) -> Self {
+        Self::compute_with_flow(area, false)
+    }
+
+    /// Compute responsive pane rects for given terminal bounds, optionally expanding the header
+    /// when the interactive wizard flow is active.
+    pub fn compute_with_flow(area: Rect, is_flow_active: bool) -> Self {
         if area.width < Self::MIN_WIDTH || area.height < Self::MIN_HEIGHT {
             return Self {
                 total_area: area,
@@ -61,7 +67,16 @@ impl AppLayout {
         }
 
         // 1. Vertical split: [Header, Middle, Status]
-        let header_height = if area.height >= 30 { 3 } else { 1 };
+        let default_header_height = if area.height >= 30 { 3 } else { 1 };
+        let header_height = if is_flow_active {
+            if area.height >= 30 {
+                5
+            } else {
+                4
+            }
+        } else {
+            default_header_height
+        };
         let status_height = if area.height >= 30 { 3 } else { 2 };
         let middle_height = area.height.saturating_sub(header_height + status_height);
 
@@ -121,13 +136,22 @@ impl AppLayout {
     }
 
     /// Return styled Block border depending on focus state.
-    pub fn block_for(&self, pane: PaneId, focused_pane: PaneId, title: &'static str) -> Block<'static> {
+    pub fn block_for(
+        &self,
+        pane: PaneId,
+        focused_pane: PaneId,
+        title: &'static str,
+    ) -> Block<'static> {
         let is_focused = pane == focused_pane;
         if is_focused {
             Block::default()
                 .borders(Borders::ALL)
                 .border_type(BorderType::Thick)
-                .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )
                 .title(format!(" ❯ [ACTIVO] {} ❮ ", title))
         } else {
             Block::default()

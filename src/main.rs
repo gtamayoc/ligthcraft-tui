@@ -10,11 +10,11 @@ pub mod queue;
 pub mod storage;
 pub mod tui;
 
+use clap::Parser;
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
-use clap::Parser;
 
 use app::AppController;
 use graphics::protocol::ProtocolOverride;
@@ -182,9 +182,15 @@ async fn main() -> ExitCode {
             Ok(store) => match store.list_presets() {
                 Ok(presets) => {
                     println!("============================================================");
-                    println!("  LightCraft Presets Catalog ({:>2} presets available)       ", presets.len());
+                    println!(
+                        "  LightCraft Presets Catalog ({:>2} presets available)       ",
+                        presets.len()
+                    );
                     println!("============================================================");
-                    println!("{:<20} {:<20} {:<12} {:<25}", "ID", "NAME", "TYPE", "CATEGORY");
+                    println!(
+                        "{:<20} {:<20} {:<12} {:<25}",
+                        "ID", "NAME", "TYPE", "CATEGORY"
+                    );
                     println!("------------------------------------------------------------");
                     for p in presets {
                         let kind = if p.is_builtin { "Built-in" } else { "User" };
@@ -257,7 +263,10 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
-        println!("Pre-flight check passed for {} master files.", pre_results.len());
+        println!(
+            "Pre-flight check passed for {} master files.",
+            pre_results.len()
+        );
 
         let pipeline = export::ExportPipeline::new();
         let cr3_files = [
@@ -315,7 +324,13 @@ async fn main() -> ExitCode {
                     };
 
                     match pipeline.execute_export(None, &job).await {
-                        Ok(export::ExportOutcome::Success { output_path: _, width, height, bytes_written, elapsed }) => {
+                        Ok(export::ExportOutcome::Success {
+                            output_path: _,
+                            width,
+                            height,
+                            bytes_written,
+                            elapsed,
+                        }) => {
                             success_count += 1;
                             total_bytes += bytes_written;
                             println!(
@@ -355,7 +370,9 @@ async fn main() -> ExitCode {
                 for res in &post_results {
                     println!("  [PASS] {:<15} | sha256 verified", res.filename);
                 }
-                println!("SUCCESS: 100% byte-for-byte immutability confirmed across all 5 master files.");
+                println!(
+                    "SUCCESS: 100% byte-for-byte immutability confirmed across all 5 master files."
+                );
             }
             Err(e) => {
                 eprintln!("CRITICAL ERROR: Post-flight immutability failed: {}", e);
@@ -381,7 +398,10 @@ async fn main() -> ExitCode {
                 return ExitCode::FAILURE;
             }
         };
-        println!("Pre-flight check OK: {} archivos maestros RAW verificados.", pre_results.len());
+        println!(
+            "Pre-flight check OK: {} archivos maestros RAW verificados.",
+            pre_results.len()
+        );
 
         let pipeline = export::ExportPipeline::new();
         let cr3_files = [
@@ -406,7 +426,12 @@ async fn main() -> ExitCode {
         for &cr3_name in &cr3_files {
             let cr3_path = draw_dir.join(cr3_name);
             processed_photos += 1;
-            println!("\n[Foto {}/{}] Cargando y procesando: {}", processed_photos, cr3_files.len(), cr3_name);
+            println!(
+                "\n[Foto {}/{}] Cargando y procesando: {}",
+                processed_photos,
+                cr3_files.len(),
+                cr3_name
+            );
 
             for preset in &presets {
                 // 1. Guardar de inmediato Master TIFF 16-bit
@@ -431,12 +456,20 @@ async fn main() -> ExitCode {
                 };
 
                 match pipeline.execute_export(None, &tiff_job).await {
-                    Ok(export::ExportOutcome::Success { bytes_written, output_path, elapsed, .. }) => {
+                    Ok(export::ExportOutcome::Success {
+                        bytes_written,
+                        output_path,
+                        elapsed,
+                        ..
+                    }) => {
                         total_files_generated += 1;
                         total_bytes_saved += bytes_written;
                         println!(
                             "  ✓ Guardado inmediato: {:<30} | TIFF 16-bit | {:.1} MB | {:?}",
-                            output_path.file_name().unwrap_or_default().to_string_lossy(),
+                            output_path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy(),
                             bytes_written as f64 / 1_048_576.0,
                             elapsed
                         );
@@ -472,12 +505,20 @@ async fn main() -> ExitCode {
                 };
 
                 match pipeline.execute_export(None, &jpeg_job).await {
-                    Ok(export::ExportOutcome::Success { bytes_written, output_path, elapsed, .. }) => {
+                    Ok(export::ExportOutcome::Success {
+                        bytes_written,
+                        output_path,
+                        elapsed,
+                        ..
+                    }) => {
                         total_files_generated += 1;
                         total_bytes_saved += bytes_written;
                         println!(
                             "  ✓ Guardado inmediato: {:<30} | JPEG 100%  | {:.1} MB | {:?}",
-                            output_path.file_name().unwrap_or_default().to_string_lossy(),
+                            output_path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy(),
                             bytes_written as f64 / 1_048_576.0,
                             elapsed
                         );
@@ -507,7 +548,10 @@ async fn main() -> ExitCode {
         match verify_cr3_baseline(&draw_dir) {
             Ok(post_results) => {
                 for res in &post_results {
-                    println!("  [PASS] {:<15} | 100% idéntico a SHA-256 baseline", res.filename);
+                    println!(
+                        "  [PASS] {:<15} | 100% idéntico a SHA-256 baseline",
+                        res.filename
+                    );
                 }
                 println!("INMUTABILIDAD GARANTIZADA: Ningún archivo RAW original fue modificado.");
             }
@@ -523,7 +567,9 @@ async fn main() -> ExitCode {
         had_action = true;
         let draw_dir = cli.draw_dir.clone().unwrap_or_else(find_draw_dir);
         let store = match cli.presets_dir {
-            Some(ref dir) => PresetStore::with_default_builtins(dir.clone()).unwrap_or_else(|_| PresetStore::default_store(PresetStore::default_builtins()).unwrap()),
+            Some(ref dir) => PresetStore::with_default_builtins(dir.clone()).unwrap_or_else(|_| {
+                PresetStore::default_store(PresetStore::default_builtins()).unwrap()
+            }),
             None => PresetStore::default_store(PresetStore::default_builtins()).unwrap(),
         };
 
@@ -545,7 +591,8 @@ async fn main() -> ExitCode {
             }
         };
 
-        let graphics_override = ProtocolOverride::from_str_loose(&cli.graphics).unwrap_or(ProtocolOverride::Auto);
+        let graphics_override =
+            ProtocolOverride::from_str_loose(&cli.graphics).unwrap_or(ProtocolOverride::Auto);
 
         let terminal = match TerminalGuard::init() {
             Ok(t) => t,

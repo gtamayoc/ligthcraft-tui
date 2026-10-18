@@ -183,16 +183,48 @@ impl BuiltinPreset {
 
             Self::Cinema => {
                 let mut mixer = MixerSettings::default();
-                mixer.green = HslAdjustment { hue: 15.0, sat: -25.0, lum: -10.0 };
-                mixer.yellow = HslAdjustment { hue: -5.0, sat: -15.0, lum: 0.0 };
-                mixer.orange = HslAdjustment { hue: -3.0, sat: 10.0, lum: 5.0 };
-                mixer.red = HslAdjustment { hue: 0.0, sat: 5.0, lum: 0.0 };
-                mixer.blue = HslAdjustment { hue: 5.0, sat: -10.0, lum: 0.0 };
+                mixer.green = HslAdjustment {
+                    hue: 15.0,
+                    sat: -25.0,
+                    lum: -10.0,
+                };
+                mixer.yellow = HslAdjustment {
+                    hue: -5.0,
+                    sat: -15.0,
+                    lum: 0.0,
+                };
+                mixer.orange = HslAdjustment {
+                    hue: -3.0,
+                    sat: 10.0,
+                    lum: 5.0,
+                };
+                mixer.red = HslAdjustment {
+                    hue: 0.0,
+                    sat: 5.0,
+                    lum: 0.0,
+                };
+                mixer.blue = HslAdjustment {
+                    hue: 5.0,
+                    sat: -10.0,
+                    lum: 0.0,
+                };
 
                 let mut grading = GradingSettings::default();
-                grading.shadows = HslAdjustment { hue: 215.0, sat: 18.0, lum: -5.0 };
-                grading.highlights = HslAdjustment { hue: 42.0, sat: 16.0, lum: 2.0 };
-                grading.midtones = HslAdjustment { hue: 35.0, sat: 8.0, lum: 0.0 };
+                grading.shadows = HslAdjustment {
+                    hue: 215.0,
+                    sat: 18.0,
+                    lum: -5.0,
+                };
+                grading.highlights = HslAdjustment {
+                    hue: 42.0,
+                    sat: 16.0,
+                    lum: 2.0,
+                };
+                grading.midtones = HslAdjustment {
+                    hue: 35.0,
+                    sat: 8.0,
+                    lum: 0.0,
+                };
                 grading.blending = 55.0;
                 grading.balance = -10.0;
 
@@ -239,7 +271,12 @@ impl BuiltinPreset {
                         updated_at: None,
                         version: 1,
                         recommended_intensity: 100,
-                        tags: vec!["cinema".into(), "film".into(), "warm".into(), "portrait".into()],
+                        tags: vec![
+                            "cinema".into(),
+                            "film".into(),
+                            "warm".into(),
+                            "portrait".into(),
+                        ],
                     },
                 }
             }
@@ -291,24 +328,65 @@ impl BuiltinPreset {
                         updated_at: None,
                         version: 1,
                         recommended_intensity: 100,
-                        tags: vec!["monochrome".into(), "black-and-white".into(), "contrast".into(), "fine-art".into()],
+                        tags: vec![
+                            "monochrome".into(),
+                            "black-and-white".into(),
+                            "contrast".into(),
+                            "fine-art".into(),
+                        ],
                     },
                 }
             }
 
             Self::TealOrange => {
                 let mut mixer = MixerSettings::default();
-                mixer.orange = HslAdjustment { hue: 5.0, sat: 25.0, lum: 10.0 };
-                mixer.yellow = HslAdjustment { hue: -15.0, sat: 15.0, lum: 0.0 };
-                mixer.red = HslAdjustment { hue: 5.0, sat: 10.0, lum: 0.0 };
-                mixer.blue = HslAdjustment { hue: -25.0, sat: 25.0, lum: -10.0 };
-                mixer.aqua = HslAdjustment { hue: -10.0, sat: 30.0, lum: -5.0 };
-                mixer.green = HslAdjustment { hue: 20.0, sat: -20.0, lum: 0.0 };
+                mixer.orange = HslAdjustment {
+                    hue: 5.0,
+                    sat: 25.0,
+                    lum: 10.0,
+                };
+                mixer.yellow = HslAdjustment {
+                    hue: -15.0,
+                    sat: 15.0,
+                    lum: 0.0,
+                };
+                mixer.red = HslAdjustment {
+                    hue: 5.0,
+                    sat: 10.0,
+                    lum: 0.0,
+                };
+                mixer.blue = HslAdjustment {
+                    hue: -25.0,
+                    sat: 25.0,
+                    lum: -10.0,
+                };
+                mixer.aqua = HslAdjustment {
+                    hue: -10.0,
+                    sat: 30.0,
+                    lum: -5.0,
+                };
+                mixer.green = HslAdjustment {
+                    hue: 20.0,
+                    sat: -20.0,
+                    lum: 0.0,
+                };
 
                 let mut grading = GradingSettings::default();
-                grading.shadows = HslAdjustment { hue: 195.0, sat: 28.0, lum: -5.0 };
-                grading.highlights = HslAdjustment { hue: 35.0, sat: 22.0, lum: 5.0 };
-                grading.midtones = HslAdjustment { hue: 30.0, sat: 10.0, lum: 0.0 };
+                grading.shadows = HslAdjustment {
+                    hue: 195.0,
+                    sat: 28.0,
+                    lum: -5.0,
+                };
+                grading.highlights = HslAdjustment {
+                    hue: 35.0,
+                    sat: 22.0,
+                    lum: 5.0,
+                };
+                grading.midtones = HslAdjustment {
+                    hue: 30.0,
+                    sat: 10.0,
+                    lum: 0.0,
+                };
                 grading.blending = 60.0;
                 grading.balance = 5.0;
 
@@ -354,22 +432,55 @@ impl BuiltinPreset {
                         updated_at: None,
                         version: 1,
                         recommended_intensity: 100,
-                        tags: vec!["teal-orange".into(), "cinema".into(), "color-grading".into(), "blockbuster".into()],
+                        tags: vec![
+                            "teal-orange".into(),
+                            "cinema".into(),
+                            "color-grading".into(),
+                            "blockbuster".into(),
+                        ],
                     },
                 }
             }
 
             Self::GoldenHour => {
                 let mut mixer = MixerSettings::default();
-                mixer.yellow = HslAdjustment { hue: -5.0, sat: 20.0, lum: 15.0 };
-                mixer.orange = HslAdjustment { hue: 0.0, sat: 15.0, lum: 10.0 };
-                mixer.red = HslAdjustment { hue: 5.0, sat: 10.0, lum: 0.0 };
-                mixer.blue = HslAdjustment { hue: 5.0, sat: -15.0, lum: 0.0 };
+                mixer.yellow = HslAdjustment {
+                    hue: -5.0,
+                    sat: 20.0,
+                    lum: 15.0,
+                };
+                mixer.orange = HslAdjustment {
+                    hue: 0.0,
+                    sat: 15.0,
+                    lum: 10.0,
+                };
+                mixer.red = HslAdjustment {
+                    hue: 5.0,
+                    sat: 10.0,
+                    lum: 0.0,
+                };
+                mixer.blue = HslAdjustment {
+                    hue: 5.0,
+                    sat: -15.0,
+                    lum: 0.0,
+                };
 
                 let mut grading = GradingSettings::default();
-                grading.shadows = HslAdjustment { hue: 45.0, sat: 12.0, lum: 5.0 };
-                grading.highlights = HslAdjustment { hue: 38.0, sat: 18.0, lum: 5.0 };
-                grading.midtones = HslAdjustment { hue: 40.0, sat: 8.0, lum: 0.0 };
+                grading.shadows = HslAdjustment {
+                    hue: 45.0,
+                    sat: 12.0,
+                    lum: 5.0,
+                };
+                grading.highlights = HslAdjustment {
+                    hue: 38.0,
+                    sat: 18.0,
+                    lum: 5.0,
+                };
+                grading.midtones = HslAdjustment {
+                    hue: 40.0,
+                    sat: 8.0,
+                    lum: 0.0,
+                };
                 grading.blending = 65.0;
                 grading.balance = 10.0;
 
@@ -409,7 +520,12 @@ impl BuiltinPreset {
                         updated_at: None,
                         version: 1,
                         recommended_intensity: 100,
-                        tags: vec!["golden-hour".into(), "sunset".into(), "warm".into(), "landscape".into()],
+                        tags: vec![
+                            "golden-hour".into(),
+                            "sunset".into(),
+                            "warm".into(),
+                            "landscape".into(),
+                        ],
                     },
                 }
             }
@@ -503,9 +619,18 @@ mod tests {
     fn test_from_str_loose_resolution() {
         assert_eq!(BuiltinPreset::get("natural"), Some(BuiltinPreset::Natural));
         assert_eq!(BuiltinPreset::get("CINEMA"), Some(BuiltinPreset::Cinema));
-        assert_eq!(BuiltinPreset::get("bw-high-contrast"), Some(BuiltinPreset::BwHighContrast));
-        assert_eq!(BuiltinPreset::get("teal & orange"), Some(BuiltinPreset::TealOrange));
-        assert_eq!(BuiltinPreset::get("Golden Hour"), Some(BuiltinPreset::GoldenHour));
+        assert_eq!(
+            BuiltinPreset::get("bw-high-contrast"),
+            Some(BuiltinPreset::BwHighContrast)
+        );
+        assert_eq!(
+            BuiltinPreset::get("teal & orange"),
+            Some(BuiltinPreset::TealOrange)
+        );
+        assert_eq!(
+            BuiltinPreset::get("Golden Hour"),
+            Some(BuiltinPreset::GoldenHour)
+        );
         assert_eq!(BuiltinPreset::get("nonexistent"), None);
     }
 }

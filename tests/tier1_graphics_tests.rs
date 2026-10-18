@@ -4,14 +4,16 @@
 //! - F-TUI-03: Terminal Graphic Protocols (Kitty, Sixel, Halfblocks) & 3:2 Aspect Ratio Preservation
 //! - F-RNF-02: Preview Memory Budgeting, Dual-Tier LRU Cache, and Zero Memory Leak Guarantee
 
-use std::time::Instant;
 use image::imageops::FilterType;
 use image::{DynamicImage, RgbaImage};
 use ratatui::layout::Rect;
-use ratatui_image::FontSize;
 use ratatui_image::picker::{Picker, ProtocolType};
+use ratatui_image::FontSize;
+use std::time::Instant;
 
-use lightcraft_tui::graphics::cache::{CacheProtocolKind, PreviewCache, PreviewCacheConfig, PreviewCacheKey};
+use lightcraft_tui::graphics::cache::{
+    CacheProtocolKind, PreviewCache, PreviewCacheConfig, PreviewCacheKey,
+};
 use lightcraft_tui::graphics::protocol::{GraphicsProtocol, ProtocolOverride};
 use lightcraft_tui::graphics::renderer::ImageRenderer;
 
@@ -21,11 +23,26 @@ use lightcraft_tui::graphics::renderer::ImageRenderer;
 
 #[test]
 fn test_t1_tui03_01_protocol_override_parsing() {
-    assert_eq!(ProtocolOverride::from_str_loose("auto"), Some(ProtocolOverride::Auto));
-    assert_eq!(ProtocolOverride::from_str_loose("KITTY"), Some(ProtocolOverride::Kitty));
-    assert_eq!(ProtocolOverride::from_str_loose("Sixel"), Some(ProtocolOverride::Sixel));
-    assert_eq!(ProtocolOverride::from_str_loose("halfblocks"), Some(ProtocolOverride::Halfblocks));
-    assert_eq!(ProtocolOverride::from_str_loose("unicode"), Some(ProtocolOverride::Halfblocks));
+    assert_eq!(
+        ProtocolOverride::from_str_loose("auto"),
+        Some(ProtocolOverride::Auto)
+    );
+    assert_eq!(
+        ProtocolOverride::from_str_loose("KITTY"),
+        Some(ProtocolOverride::Kitty)
+    );
+    assert_eq!(
+        ProtocolOverride::from_str_loose("Sixel"),
+        Some(ProtocolOverride::Sixel)
+    );
+    assert_eq!(
+        ProtocolOverride::from_str_loose("halfblocks"),
+        Some(ProtocolOverride::Halfblocks)
+    );
+    assert_eq!(
+        ProtocolOverride::from_str_loose("unicode"),
+        Some(ProtocolOverride::Halfblocks)
+    );
     assert_eq!(ProtocolOverride::from_str_loose("unknown"), None);
 }
 
@@ -93,11 +110,15 @@ fn test_t1_tui03_05_prepare_protocol_downscaling_execution() {
     let img = DynamicImage::ImageRgba8(RgbaImage::new(600, 400));
     let pane = Rect::new(0, 0, 60, 20);
 
-    let (proto, render_area) = ImageRenderer::prepare_protocol(&picker, &img, pane, FilterType::Nearest).unwrap();
+    let (proto, render_area) =
+        ImageRenderer::prepare_protocol(&picker, &img, pane, FilterType::Nearest).unwrap();
 
     assert!(render_area.width > 0 && render_area.width <= pane.width);
     assert!(render_area.height > 0 && render_area.height <= pane.height);
-    assert!(matches!(proto, ratatui_image::protocol::Protocol::Halfblocks(_)));
+    assert!(matches!(
+        proto,
+        ratatui_image::protocol::Protocol::Halfblocks(_)
+    ));
 }
 
 // ============================================================================
@@ -118,7 +139,8 @@ fn test_t1_rnf02_01_cache_budget_ceiling_and_eviction() {
     // Insert 20 preview entries
     for i in 0..20 {
         let img = DynamicImage::ImageRgba8(RgbaImage::new(100, 100));
-        let (proto, rect) = ImageRenderer::prepare_protocol(&picker, &img, pane, FilterType::Nearest).unwrap();
+        let (proto, rect) =
+            ImageRenderer::prepare_protocol(&picker, &img, pane, FilterType::Nearest).unwrap();
         let key = PreviewCacheKey {
             photo_id: format!("photo_{}", i),
             recipe_hash: i as u64,
@@ -144,7 +166,8 @@ fn test_t1_rnf02_02_cache_hit_speed_and_retrieval() {
     let img = DynamicImage::ImageRgba8(RgbaImage::new(200, 200));
     let pane = Rect::new(0, 0, 50, 25);
 
-    let (proto, rect) = ImageRenderer::prepare_protocol(&picker, &img, pane, FilterType::Nearest).unwrap();
+    let (proto, rect) =
+        ImageRenderer::prepare_protocol(&picker, &img, pane, FilterType::Nearest).unwrap();
     let key = PreviewCacheKey {
         photo_id: "IMG_0588.CR3".into(),
         recipe_hash: 42,
@@ -166,7 +189,11 @@ fn test_t1_rnf02_02_cache_hit_speed_and_retrieval() {
     assert!(hit.byte_size > 0);
 
     // Cache hit must resolve in < 1ms
-    assert!(elapsed.as_millis() < 5, "Cache hit took {:?}, expected < 1ms", elapsed);
+    assert!(
+        elapsed.as_millis() < 5,
+        "Cache hit took {:?}, expected < 1ms",
+        elapsed
+    );
 }
 
 #[test]
@@ -178,7 +205,8 @@ fn test_t1_rnf02_03_photo_invalidation_and_purge() {
 
     // Insert 3 variants for IMG_0588 and 2 for IMG_0589
     for r in 0..3 {
-        let (proto, rect) = ImageRenderer::prepare_protocol(&picker, &img, pane, FilterType::Nearest).unwrap();
+        let (proto, rect) =
+            ImageRenderer::prepare_protocol(&picker, &img, pane, FilterType::Nearest).unwrap();
         cache.insert_protocol(
             PreviewCacheKey {
                 photo_id: "IMG_0588.CR3".into(),
@@ -192,7 +220,8 @@ fn test_t1_rnf02_03_photo_invalidation_and_purge() {
         );
     }
     for r in 0..2 {
-        let (proto, rect) = ImageRenderer::prepare_protocol(&picker, &img, pane, FilterType::Nearest).unwrap();
+        let (proto, rect) =
+            ImageRenderer::prepare_protocol(&picker, &img, pane, FilterType::Nearest).unwrap();
         cache.insert_protocol(
             PreviewCacheKey {
                 photo_id: "IMG_0589.CR3".into(),

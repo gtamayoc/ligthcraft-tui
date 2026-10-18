@@ -1,10 +1,10 @@
 //! Implementation of disk storage, TOML/JSON serialization, and preset management.
 
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
 
 use crate::engine::presets::BuiltinPreset;
@@ -138,7 +138,10 @@ impl PresetFormat {
             "json" => Ok(PresetFormat::Json),
             other => Err(StorageError::InvalidFormat {
                 path: path.to_path_buf(),
-                reason: format!("Unsupported preset extension '.{}'; expected .toml or .json", other),
+                reason: format!(
+                    "Unsupported preset extension '.{}'; expected .toml or .json",
+                    other
+                ),
             }),
         }
     }
@@ -146,19 +149,19 @@ impl PresetFormat {
     /// Serialize a preset file to a formatted string.
     pub fn serialize(&self, preset: &PresetFile) -> Result<String, StorageError> {
         match self {
-            PresetFormat::Toml => {
-                toml::to_string_pretty(preset)
-                    .map_err(|e| StorageError::Serialization(SerializationError::TomlSer(e)))
-            }
-            PresetFormat::Json => {
-                serde_json::to_string_pretty(preset)
-                    .map_err(|e| StorageError::Serialization(SerializationError::Json(e)))
-            }
+            PresetFormat::Toml => toml::to_string_pretty(preset)
+                .map_err(|e| StorageError::Serialization(SerializationError::TomlSer(e))),
+            PresetFormat::Json => serde_json::to_string_pretty(preset)
+                .map_err(|e| StorageError::Serialization(SerializationError::Json(e))),
         }
     }
 
     /// Deserialize a preset file from a formatted string.
-    pub fn deserialize(&self, content: &str, source_path: &Path) -> Result<PresetFile, StorageError> {
+    pub fn deserialize(
+        &self,
+        content: &str,
+        source_path: &Path,
+    ) -> Result<PresetFile, StorageError> {
         match self {
             PresetFormat::Toml => {
                 toml::from_str(content).map_err(|e| StorageError::InvalidFormat {
@@ -212,7 +215,9 @@ pub fn validate_identifier(id: &str) -> Result<(), StorageError> {
     }
 
     // Check whitelist: [a-zA-Z0-9_-]
-    let is_valid = id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    let is_valid = id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
     if !is_valid {
         return Err(StorageError::InvalidIdentifier(id.to_string()));
     }
@@ -220,9 +225,8 @@ pub fn validate_identifier(id: &str) -> Result<(), StorageError> {
     // Check Windows reserved device names
     let upper = id.to_ascii_uppercase();
     const RESERVED: &[&str] = &[
-        "CON", "PRN", "AUX", "NUL",
-        "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
-        "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
 
     if RESERVED.contains(&upper.as_str()) {
@@ -242,7 +246,11 @@ pub fn validate_lookup_target(target: &str) -> Result<(), StorageError> {
     }
 
     // Reject path separators, null bytes, or directory navigation immediately
-    if target.contains('/') || target.contains('\\') || target.contains('\0') || target.contains("..") {
+    if target.contains('/')
+        || target.contains('\\')
+        || target.contains('\0')
+        || target.contains("..")
+    {
         return Err(StorageError::PathTraversal(target.to_string()));
     }
 
@@ -258,7 +266,10 @@ pub struct PresetStore {
 impl PresetStore {
     /// Returns default built-in preset files for all 5 core presets.
     pub fn default_builtins() -> Vec<PresetFile> {
-        BuiltinPreset::all().iter().map(|&p| PresetFile::from(p)).collect()
+        BuiltinPreset::all()
+            .iter()
+            .map(|&p| PresetFile::from(p))
+            .collect()
     }
 
     /// Creates a PresetStore rooted at the given directory with specified built-in presets.
@@ -297,8 +308,8 @@ impl PresetStore {
 
         // 2. Scan physical storage directory
         if self.root_dir.exists() {
-            let entries = fs::read_dir(&self.root_dir)
-                .map_err(|e| StorageError::io(&self.root_dir, e))?;
+            let entries =
+                fs::read_dir(&self.root_dir).map_err(|e| StorageError::io(&self.root_dir, e))?;
 
             for entry in entries {
                 let entry = match entry {
@@ -336,19 +347,21 @@ impl PresetStore {
                         }
                     }
                     Err(err) => {
-                        warn!("Skipping malformed preset file '{}': {}", path.display(), err);
+                        warn!(
+                            "Skipping malformed preset file '{}': {}",
+                            path.display(),
+                            err
+                        );
                     }
                 }
             }
         }
 
         // 3. Sort: built-ins first, then alphabetical by name
-        results.sort_by(|a, b| {
-            match (a.is_builtin, b.is_builtin) {
-                (true, false) => std::cmp::Ordering::Less,
-                (false, true) => std::cmp::Ordering::Greater,
-                _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
-            }
+        results.sort_by(|a, b| match (a.is_builtin, b.is_builtin) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
         });
 
         Ok(results)
@@ -376,23 +389,23 @@ impl PresetStore {
         if validate_identifier(id_or_name).is_ok() {
             let toml_path = self.root_dir.join(format!("{}.toml", id_or_name));
             if toml_path.is_file() {
-                let content = fs::read_to_string(&toml_path)
-                    .map_err(|e| StorageError::io(&toml_path, e))?;
+                let content =
+                    fs::read_to_string(&toml_path).map_err(|e| StorageError::io(&toml_path, e))?;
                 return PresetFormat::Toml.deserialize(&content, &toml_path);
             }
 
             let json_path = self.root_dir.join(format!("{}.json", id_or_name));
             if json_path.is_file() {
-                let content = fs::read_to_string(&json_path)
-                    .map_err(|e| StorageError::io(&json_path, e))?;
+                let content =
+                    fs::read_to_string(&json_path).map_err(|e| StorageError::io(&json_path, e))?;
                 return PresetFormat::Json.deserialize(&content, &json_path);
             }
         }
 
         // 3. Scan directory files to match by display name or id
         if self.root_dir.exists() {
-            let entries = fs::read_dir(&self.root_dir)
-                .map_err(|e| StorageError::io(&self.root_dir, e))?;
+            let entries =
+                fs::read_dir(&self.root_dir).map_err(|e| StorageError::io(&self.root_dir, e))?;
 
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -428,7 +441,11 @@ impl PresetStore {
             ));
         }
 
-        if self.builtin_presets.iter().any(|b| b.metadata.id == preset.metadata.id) {
+        if self
+            .builtin_presets
+            .iter()
+            .any(|b| b.metadata.id == preset.metadata.id)
+        {
             return Err(StorageError::PermissionDenied(
                 "Preset ID is reserved by a built-in system preset".into(),
             ));
@@ -436,9 +453,9 @@ impl PresetStore {
 
         validate_identifier(&preset.metadata.id)?;
 
-        let target_path = self
-            .root_dir
-            .join(format!("{}.{}", preset.metadata.id, format.extension()));
+        let target_path =
+            self.root_dir
+                .join(format!("{}.{}", preset.metadata.id, format.extension()));
 
         // Serialize payload
         let payload = format.serialize(preset)?;
@@ -499,8 +516,8 @@ impl PresetStore {
 
         // Scan files by display name or id
         if self.root_dir.exists() {
-            let entries = fs::read_dir(&self.root_dir)
-                .map_err(|e| StorageError::io(&self.root_dir, e))?;
+            let entries =
+                fs::read_dir(&self.root_dir).map_err(|e| StorageError::io(&self.root_dir, e))?;
 
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -511,7 +528,8 @@ impl PresetStore {
                                 if file.metadata.name.eq_ignore_ascii_case(id_or_name)
                                     || file.metadata.id.eq_ignore_ascii_case(id_or_name)
                                 {
-                                    fs::remove_file(&path).map_err(|e| StorageError::io(&path, e))?;
+                                    fs::remove_file(&path)
+                                        .map_err(|e| StorageError::io(&path, e))?;
                                     return Ok(());
                                 }
                             }
@@ -524,7 +542,6 @@ impl PresetStore {
         Err(StorageError::NotFound(id_or_name.to_string()))
     }
 
-
     /// Imports a preset file from an external location, validates and saves it in the store.
     pub fn import_preset(&self, source_path: &Path) -> Result<PresetFile, StorageError> {
         if !source_path.is_file() {
@@ -532,8 +549,8 @@ impl PresetStore {
         }
 
         let format = PresetFormat::from_path(source_path)?;
-        let content = fs::read_to_string(source_path)
-            .map_err(|e| StorageError::io(source_path, e))?;
+        let content =
+            fs::read_to_string(source_path).map_err(|e| StorageError::io(source_path, e))?;
 
         let mut preset = format.deserialize(&content, source_path)?;
 
@@ -565,11 +582,14 @@ impl PresetStore {
         format: PresetFormat,
     ) -> Result<PathBuf, StorageError> {
         if !destination_dir.is_dir() {
-            return Err(StorageError::NotFound(destination_dir.display().to_string()));
+            return Err(StorageError::NotFound(
+                destination_dir.display().to_string(),
+            ));
         }
 
         let preset = self.load_preset_file(id_or_name)?;
-        let target_path = destination_dir.join(format!("{}.{}", preset.metadata.id, format.extension()));
+        let target_path =
+            destination_dir.join(format!("{}.{}", preset.metadata.id, format.extension()));
 
         let payload = format.serialize(&preset)?;
 
@@ -607,18 +627,42 @@ mod tests {
         assert!(validate_identifier("Preset123").is_ok());
 
         // Traversal / special chars
-        assert!(matches!(validate_identifier("../escape"), Err(StorageError::PathTraversal(_))));
-        assert!(matches!(validate_identifier("foo/bar"), Err(StorageError::PathTraversal(_))));
-        assert!(matches!(validate_identifier("foo\\bar"), Err(StorageError::PathTraversal(_))));
+        assert!(matches!(
+            validate_identifier("../escape"),
+            Err(StorageError::PathTraversal(_))
+        ));
+        assert!(matches!(
+            validate_identifier("foo/bar"),
+            Err(StorageError::PathTraversal(_))
+        ));
+        assert!(matches!(
+            validate_identifier("foo\\bar"),
+            Err(StorageError::PathTraversal(_))
+        ));
 
         // Reserved Windows device names
-        assert!(matches!(validate_identifier("CON"), Err(StorageError::InvalidIdentifier(_))));
-        assert!(matches!(validate_identifier("nul"), Err(StorageError::InvalidIdentifier(_))));
-        assert!(matches!(validate_identifier("COM1"), Err(StorageError::InvalidIdentifier(_))));
+        assert!(matches!(
+            validate_identifier("CON"),
+            Err(StorageError::InvalidIdentifier(_))
+        ));
+        assert!(matches!(
+            validate_identifier("nul"),
+            Err(StorageError::InvalidIdentifier(_))
+        ));
+        assert!(matches!(
+            validate_identifier("COM1"),
+            Err(StorageError::InvalidIdentifier(_))
+        ));
 
         // Length
-        assert!(matches!(validate_identifier(""), Err(StorageError::InvalidIdentifier(_))));
-        assert!(matches!(validate_identifier(&"a".repeat(65)), Err(StorageError::InvalidIdentifier(_))));
+        assert!(matches!(
+            validate_identifier(""),
+            Err(StorageError::InvalidIdentifier(_))
+        ));
+        assert!(matches!(
+            validate_identifier(&"a".repeat(65)),
+            Err(StorageError::InvalidIdentifier(_))
+        ));
     }
 
     #[test]
@@ -638,7 +682,9 @@ mod tests {
         // 3. Built-in cannot be deleted or overwritten
         assert!(store.delete_preset("natural").is_err());
         let builtin_file = store.load_preset_file("natural").unwrap();
-        assert!(store.save_preset(&builtin_file, PresetFormat::Toml).is_err());
+        assert!(store
+            .save_preset(&builtin_file, PresetFormat::Toml)
+            .is_err());
 
         // 4. Save custom preset
         let custom_meta = PresetMetadata {
@@ -674,7 +720,9 @@ mod tests {
 
         // 7. Export custom preset
         let export_dir = tempdir().unwrap();
-        let exported_path = store.export_preset("custom-look", export_dir.path(), PresetFormat::Json).unwrap();
+        let exported_path = store
+            .export_preset("custom-look", export_dir.path(), PresetFormat::Json)
+            .unwrap();
         assert!(exported_path.exists());
 
         // 8. Delete custom preset

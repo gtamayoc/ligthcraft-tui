@@ -7,14 +7,14 @@
 //! - F-SGL-04: 1:1 Detail Zoom / Crop Inspection with Coordinate Boundary Clamping
 //! - F-SGL-05: Favorite Tagging, Rating, Pick/Reject Flagging & Quick Export
 
-use std::time::Instant;
 use image::{DynamicImage, GenericImageView, RgbaImage};
-use ratatui::layout::Rect;
 use lightcraft_tui::mcp::tools::PhotoInfo;
 use lightcraft_tui::tui::mode_a::{
     composite_wiper, compute_variant_grid_rects, FlagStatus, HistogramData, LoupeState, ModeAState,
     ModeAView, PhotoMetadata, SplitViewKind,
 };
+use ratatui::layout::Rect;
+use std::time::Instant;
 
 // ============================================================================
 // Feature F-SGL-01: Single Photo Metadata Inspection & 4-Channel Histogram
@@ -200,8 +200,16 @@ fn test_t1_sgl02_03_variant_2d_navigation_and_focus_sync() {
 #[test]
 fn test_t1_sgl03_01_split_view_wiper_compositor_stitching() {
     // Construct distinct Before (pure red) and After (pure blue) images
-    let before = DynamicImage::ImageRgba8(RgbaImage::from_pixel(100, 100, image::Rgba([255, 0, 0, 255])));
-    let after = DynamicImage::ImageRgba8(RgbaImage::from_pixel(100, 100, image::Rgba([0, 0, 255, 255])));
+    let before = DynamicImage::ImageRgba8(RgbaImage::from_pixel(
+        100,
+        100,
+        image::Rgba([255, 0, 0, 255]),
+    ));
+    let after = DynamicImage::ImageRgba8(RgbaImage::from_pixel(
+        100,
+        100,
+        image::Rgba([0, 0, 255, 255]),
+    ));
 
     // 50% split divider
     let composite = composite_wiper(&before, &after, 0.5);
@@ -346,20 +354,25 @@ fn test_variant_multiselection_and_batch_helpers() {
 
 #[tokio::test]
 async fn test_panel1_left_right_keys_isolated_from_panel2_variants() {
-    use std::sync::Arc;
-    use std::path::PathBuf;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use lightcraft_tui::app::AppController;
     use lightcraft_tui::graphics::protocol::ProtocolOverride;
     use lightcraft_tui::mcp::client::{McpClient, McpClientConfig};
     use lightcraft_tui::storage::presets_store::PresetStore;
     use lightcraft_tui::tui::layout::PaneId;
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     app.mode_a.view_mode = ModeAView::VariantMatrix;
     app.mode_a.variant_count = 4;
@@ -383,35 +396,49 @@ async fn test_panel1_left_right_keys_isolated_from_panel2_variants() {
 
     // Pressing Right / 'l' while in Panel 1 MUST NOT change variant focus in Panel 2
     app.handle_key(right_key).await.unwrap();
-    assert_eq!(app.mode_a.focused_variant, 0, "Right arrow must be disabled in Panel 1");
+    assert_eq!(
+        app.mode_a.focused_variant, 0,
+        "Right arrow must be disabled in Panel 1"
+    );
 
     app.handle_key(l_key).await.unwrap();
-    assert_eq!(app.mode_a.focused_variant, 0, "'l' key must be disabled in Panel 1");
+    assert_eq!(
+        app.mode_a.focused_variant, 0,
+        "'l' key must be disabled in Panel 1"
+    );
 
     // Switch focus to PreviewCanvas (Panel 2)
     app.focused_pane = PaneId::PreviewCanvas;
 
     // Now Right key should advance variant focus
     app.handle_key(right_key).await.unwrap();
-    assert_eq!(app.mode_a.focused_variant, 1, "Right arrow must work in Panel 2");
+    assert_eq!(
+        app.mode_a.focused_variant, 1,
+        "Right arrow must work in Panel 2"
+    );
 }
 
 #[tokio::test]
 async fn test_variant_export_prompt_and_cancellation() {
-    use std::sync::Arc;
-    use std::path::PathBuf;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use lightcraft_tui::app::AppController;
     use lightcraft_tui::graphics::protocol::ProtocolOverride;
     use lightcraft_tui::mcp::client::{McpClient, McpClientConfig};
     use lightcraft_tui::storage::presets_store::PresetStore;
     use lightcraft_tui::tui::layout::PaneId;
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     app.focused_pane = PaneId::PreviewCanvas;
     app.mode_a.view_mode = ModeAView::VariantMatrix;
@@ -436,7 +463,9 @@ async fn test_variant_export_prompt_and_cancellation() {
     };
     app.handle_key(e_key).await.unwrap();
     assert!(app.export_prompt, "Export prompt should be active");
-    assert!(app.status_message.contains("Exportación: 1 variante(s) seleccionada(s)"));
+    assert!(app
+        .status_message
+        .contains("Exportación: 1 variante(s) seleccionada(s)"));
 
     // Press Esc to cancel prompt
     let esc_key = KeyEvent {
@@ -452,20 +481,25 @@ async fn test_variant_export_prompt_and_cancellation() {
 
 #[tokio::test]
 async fn test_variant_batch_export_execution() {
-    use std::sync::Arc;
-    use std::path::PathBuf;
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use lightcraft_tui::app::AppController;
     use lightcraft_tui::graphics::protocol::ProtocolOverride;
     use lightcraft_tui::mcp::client::{McpClient, McpClientConfig};
     use lightcraft_tui::storage::presets_store::PresetStore;
     use lightcraft_tui::tui::layout::PaneId;
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
-    let mut app = AppController::new(mcp, store, PathBuf::from("DRAW"), ProtocolOverride::Halfblocks)
-        .await
-        .unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
 
     app.focused_pane = PaneId::PreviewCanvas;
     app.mode_a.view_mode = ModeAView::VariantMatrix;
@@ -499,11 +533,13 @@ async fn test_variant_batch_export_execution() {
     assert!(!app.export_prompt);
 
     if !app.items.is_empty() {
-        assert!(app.status_message.contains("Guardado OK") && app.status_message.contains("TIFF 16-bit"));
+        assert!(
+            app.status_message.contains("Guardado OK")
+                && app.status_message.contains("TIFF 16-bit")
+        );
     }
 
     // Selections should be cleared after export
     assert!(!app.mode_a.variants[0].is_selected);
     assert!(!app.mode_a.variants[1].is_selected);
 }
-
