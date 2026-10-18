@@ -7,7 +7,7 @@ use image::DynamicImage;
 use ratatui::layout::{Alignment, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
+use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::engine::presets::BuiltinPreset;
@@ -799,7 +799,7 @@ impl AppController {
             }),
         ];
 
-        let p = Paragraph::new(lines);
+        let p = Paragraph::new(lines).wrap(Wrap { trim: true });
         frame.render_widget(p, inner);
     }
 
@@ -838,7 +838,7 @@ impl AppController {
         );
 
         let line = Line::from(vec![left_part, pane_badge, right_part, help_guide]);
-        let p = Paragraph::new(line);
+        let p = Paragraph::new(line).wrap(Wrap { trim: true });
         frame.render_widget(p, area);
     }
 }

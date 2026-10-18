@@ -76,6 +76,10 @@ pub struct ScannedPhoto {
 
 /// Dual processing strategy configuration (Requirement F-BAT-03).
 #[derive(Debug, Clone, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Preserves existing public BatchStrategy API contract and test fixtures without heap boxing"
+)]
 pub enum BatchStrategy {
     /// Uniform batch: single master recipe applied across all selected photos (M x 1).
     Uniform {

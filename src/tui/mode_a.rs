@@ -5,7 +5,7 @@ use std::time::Instant;
 use image::{DynamicImage, GenericImage, GenericImageView, Rgba};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, BorderType, Borders, Paragraph};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 
 use crate::engine::presets::BuiltinPreset;
@@ -483,7 +483,7 @@ fn render_hero_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focuse
         state.active_recipe.name,
         state.active_intensity * 100.0,
     );
-    let p = Paragraph::new(details).alignment(Alignment::Left);
+    let p = Paragraph::new(details).alignment(Alignment::Left).wrap(Wrap { trim: true });
     frame.render_widget(p, inner);
 }
 
@@ -538,7 +538,7 @@ fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_f
                 "☆".repeat(5 - slot.rating as usize),
                 status_repr
             );
-            let p = Paragraph::new(text).alignment(Alignment::Center);
+            let p = Paragraph::new(text).alignment(Alignment::Center).wrap(Wrap { trim: true });
             frame.render_widget(p, inner);
         }
     }
