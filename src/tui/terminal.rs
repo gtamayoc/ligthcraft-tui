@@ -37,6 +37,7 @@ impl TerminalGuard {
         // 2. Check if running in a real interactive terminal
         let is_tty = out.is_terminal();
         if is_tty {
+            Self::maximize_window();
             enable_raw_mode().map_err(AppError::Io)?;
             execute!(out, EnterAlternateScreen, EnableMouseCapture, Hide)
                 .map_err(AppError::Io)?;
@@ -88,6 +89,31 @@ impl TerminalGuard {
     pub fn is_raw(&self) -> bool {
         self.is_raw
     }
+
+    /// Automatically maximize console window on Windows without entering borderless fullscreen.
+    #[cfg(windows)]
+    pub fn maximize_window() {
+        unsafe {
+            #[link(name = "kernel32")]
+            extern "system" {
+                fn GetConsoleWindow() -> *mut std::ffi::c_void;
+            }
+            #[link(name = "user32")]
+            extern "system" {
+                fn ShowWindow(hWnd: *mut std::ffi::c_void, nCmdShow: i32) -> i32;
+            }
+
+            let hwnd = GetConsoleWindow();
+            if !hwnd.is_null() {
+                // SW_MAXIMIZE = 3
+                ShowWindow(hwnd, 3);
+            }
+        }
+    }
+
+    /// No-op on non-Windows platforms.
+    #[cfg(not(windows))]
+    pub fn maximize_window() {}
 }
 
 impl Deref for TerminalGuard {

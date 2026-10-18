@@ -63,6 +63,7 @@ pub struct AppController {
     pub terminal_size: Rect,
     pub needs_render: bool,
     pub running: bool,
+    pub force_clear: bool,
     pub event_sender: Option<tokio::sync::mpsc::Sender<AppEvent>>,
 }
 
@@ -150,6 +151,7 @@ impl AppController {
             terminal_size: Rect::new(0, 0, 120, 30),
             needs_render: true,
             running: true,
+            force_clear: false,
             event_sender: None,
         })
     }
@@ -166,6 +168,10 @@ impl AppController {
             if self.needs_render {
                 if let Ok(size) = terminal.size() {
                     self.terminal_size = Rect::new(0, 0, size.width, size.height);
+                }
+                if self.force_clear {
+                    let _ = terminal.clear();
+                    self.force_clear = false;
                 }
                 terminal.draw(|frame| self.render(frame))?;
                 self.needs_render = false;
@@ -257,7 +263,13 @@ impl AppController {
                 self.needs_render = true;
             }
             AppEvent::Resize(w, h) => {
+                let prev_small = self.terminal_size.width < AppLayout::MIN_WIDTH
+                    || self.terminal_size.height < AppLayout::MIN_HEIGHT;
+                let now_valid = w >= AppLayout::MIN_WIDTH && h >= AppLayout::MIN_HEIGHT;
                 self.terminal_size = Rect::new(0, 0, w, h);
+                if prev_small && now_valid {
+                    self.force_clear = true;
+                }
                 self.needs_render = true;
             }
             AppEvent::Tick => {
@@ -343,6 +355,12 @@ impl AppController {
                     AppMode::BatchQueue => AppMode::SinglePhoto,
                 };
                 self.status_message = format!("Switched to {:?}", self.mode);
+                return Ok(());
+            }
+            KeyCode::F(5) => {
+                self.force_clear = true;
+                self.needs_render = true;
+                self.status_message = "Vista y buffer del terminal restablecidos (F5)".into();
                 return Ok(());
             }
             KeyCode::Tab => {
@@ -630,8 +648,8 @@ impl AppController {
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
             let layout = AppLayout::compute(self.terminal_size);
             if let Some(clicked) = layout.pane_at(mouse.column, mouse.row) {
-                // Solo cambiar foco si se hace clic dentro de uno de los 3 paneles interactivos
-                if [PaneId::Library, PaneId::PreviewCanvas, PaneId::Inspector].contains(&clicked) {
+                // Solo cambiar foco si se hace clic dentro de uno de los 2 paneles interactivos
+                if [PaneId::Library, PaneId::PreviewCanvas].contains(&clicked) {
                     self.focused_pane = clicked;
                 }
             }
@@ -678,22 +696,26 @@ impl AppController {
         // 3. Render Center Canvas (Mode A vs Mode B)
         self.render_center(frame, layout.preview_area);
 
-        // 4. Render Inspector Pane
-        self.render_inspector(frame, layout.inspector_area, &layout);
-
-        // 5. Render Status Bar
+        // 4. Render Status Bar
         self.render_status(frame, layout.status_area);
     }
 
     fn render_too_small_overlay(&self, frame: &mut Frame, area: Rect) {
-        let msg = format!(
-            "TERMINAL TOO SMALL\n\nCurrent Size: {}x{}\nMinimum Required: {}x{}\nPlease resize your terminal window.",
-            area.width, area.height, AppLayout::MIN_WIDTH, AppLayout::MIN_HEIGHT
-        );
+        if area.width < 10 || area.height < 3 {
+            return;
+        }
+        let msg = if area.width >= 40 && area.height >= 7 {
+            format!(
+                "VENTANA DEMASIADO PEQUEÑA\n\nTamaño actual: {}x{}\nMínimo requerido: {}x{}\nPor favor amplía la consola.\n[F5] Restablecer",
+                area.width, area.height, AppLayout::MIN_WIDTH, AppLayout::MIN_HEIGHT
+            )
+        } else {
+            format!("MIN: {}x{}\nACT: {}x{}", AppLayout::MIN_WIDTH, AppLayout::MIN_HEIGHT, area.width, area.height)
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Red))
-            .title(" Alert ");
+            .title(" Alerta ");
         let p = Paragraph::new(msg).block(block).alignment(Alignment::Center);
         frame.render_widget(p, area);
     }
@@ -771,43 +793,10 @@ impl AppController {
         }
     }
 
-    fn render_inspector(&self, frame: &mut Frame, area: Rect, layout: &AppLayout) {
-        let block = layout.block_for(PaneId::Inspector, self.focused_pane, "3. INSPECTOR (Presets y Controles de Revelado)");
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-
-        let lines = vec![
-            Line::from(vec![
-                Span::styled("Active Preset: ", Style::default().fg(Color::Cyan)),
-                Span::styled(&self.mode_a.active_recipe.name, Style::default().add_modifier(Modifier::BOLD)),
-            ]),
-            Line::from(vec![
-                Span::styled("Intensity:     ", Style::default().fg(Color::Cyan)),
-                Span::raw(format!("{:.0}% [===|====]", self.mode_a.active_intensity * 100.0)),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled("--- Shooting Metadata ---", Style::default().fg(Color::DarkGray))),
-            Line::from(format!("Camera:  {}", self.mode_a.metadata.camera_model.as_deref().unwrap_or("Unknown Camera"))),
-            Line::from(format!("Params:  {}", self.mode_a.metadata.exposure_summary())),
-            Line::from(format!("Format:  {} ({})", self.mode_a.metadata.format, self.mode_a.metadata.aspect_ratio_str())),
-            Line::from(""),
-            Line::from(Span::styled("--- Histogram (4-Channel) ---", Style::default().fg(Color::DarkGray))),
-            Line::from(if let Some(ref hist) = self.mode_a.histogram {
-                hist.sparklines().join("\n")
-            } else {
-                "Lum: [ ▂▃▅▆▇█▆▅▃▂ ]\nRed: [ ▂▄▆██▆▄▂   ]\nGrn: [  ▃▅▇█▇▅▃   ]\nBlu: [   ▂▄▆█▆▄▂  ]".into()
-            }),
-        ];
-
-        let p = Paragraph::new(lines).wrap(Wrap { trim: true });
-        frame.render_widget(p, inner);
-    }
-
     fn render_status(&self, frame: &mut Frame, area: Rect) {
         let active_pane_str = match self.focused_pane {
             PaneId::Library => "Panel Activo: [1. BIBLIOTECA]",
             PaneId::PreviewCanvas => "Panel Activo: [2. PREVISUALIZADOR]",
-            PaneId::Inspector => "Panel Activo: [3. INSPECTOR]",
             PaneId::QueueStatus => "Panel Activo: [COLA/ESTADO]",
         };
         let selected_count = format!("Foto {}/{} ", self.selected_index + 1, self.items.len().max(1));
@@ -825,11 +814,10 @@ impl AppController {
         };
 
         let help_text = match (self.focused_pane, self.mode_a.view_mode) {
-            (PaneId::Library, _) => " | [↑/↓]: Fotos | [Space]: Seleccionar | [Tab]: Ir a Canvas | [E]: Exportar Max Calidad | [Q]: Salir ",
-            (PaneId::PreviewCanvas, ModeAView::VariantMatrix) => " | [←/→/↑/↓]: Variantes | [Enter]: Promover | [E]: Exportar Variante Max | [1]: Hero | [Q]: Salir ",
-            (PaneId::PreviewCanvas, _) => " | [1]: Hero | [2/4/6]: Matriz Variantes | [S]: Split A/B | [E]: Exportar Max Calidad | [Q]: Salir ",
-            (PaneId::Inspector, _) => " | [[]/[]]: Intensidad -/+ | [Tab]: Siguiente Panel | [E]: Exportar Max Calidad | [Q]: Salir ",
-            _ => " | [Tab]: Foco 1↔2↔3 | [E]: Exportar Max Calidad | [Q]: Salir ",
+            (PaneId::Library, _) => " | [↑/↓]: Fotos | [Space]: Seleccionar | [Tab]: Ir a Canvas | [F5]: Refrescar | [E]: Exportar Max Calidad | [Q]: Salir ",
+            (PaneId::PreviewCanvas, ModeAView::VariantMatrix) => " | [←/→/↑/↓]: Variantes | [Enter]: Promover | [F5]: Refrescar | [E]: Exportar Variante Max | [1]: Hero | [Q]: Salir ",
+            (PaneId::PreviewCanvas, _) => " | [1]: Hero | [2/4/6]: Matriz Variantes | [S]: Split A/B | [F5]: Refrescar | [E]: Exportar Max Calidad | [Q]: Salir ",
+            _ => " | [Tab]: Foco 1↔2 | [F5]: Refrescar Pantalla | [E]: Exportar Max Calidad | [Q]: Salir ",
         };
 
         let help_guide = Span::styled(

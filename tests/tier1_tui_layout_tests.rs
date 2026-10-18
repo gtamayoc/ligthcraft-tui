@@ -37,19 +37,17 @@ fn test_t1_tui01_01_standard_desktop_layout_120x40() {
     assert_eq!(layout.status_area.height, 3);
     assert_eq!(layout.status_area.y, 37);
 
-    // Verify 3-column middle section: Library, Canvas, Inspector
+    // Verify 2-column middle section: Library, Canvas
     assert!(layout.library_area.width > 20, "Library must have adequate width");
     assert!(layout.preview_area.width > 50, "Preview canvas must be the primary central region");
-    assert!(layout.inspector_area.width > 25, "Inspector must fit develop controls");
 
     // All horizontal widths must sum exactly to terminal width
-    let total_width = layout.library_area.width + layout.preview_area.width + layout.inspector_area.width;
+    let total_width = layout.library_area.width + layout.preview_area.width;
     assert_eq!(total_width, 120);
 
-    // Heights of all three middle columns must match
+    // Heights of both middle columns must match
     assert_eq!(layout.library_area.height, 34);
     assert_eq!(layout.preview_area.height, 34);
-    assert_eq!(layout.inspector_area.height, 34);
 }
 
 #[test]
@@ -58,21 +56,20 @@ fn test_t1_tui01_02_ultrawide_layout_200x50() {
     let layout = AppLayout::compute(area);
 
     assert!(!layout.is_too_small);
-    // On ultra-wide (width >= 160), preview canvas occupies 55% = 110 columns
-    assert_eq!(layout.preview_area.width, 110);
-    assert_eq!(layout.library_area.width, 40); // 20% of 200
-    assert_eq!(layout.inspector_area.width, 50); // 25% of 200
+    // On wide (width >= 120), preview canvas occupies 80% = 160 columns, library 20% = 40
+    assert_eq!(layout.preview_area.width, 160);
+    assert_eq!(layout.library_area.width, 40);
 
-    let sum = layout.library_area.width + layout.preview_area.width + layout.inspector_area.width;
+    let sum = layout.library_area.width + layout.preview_area.width;
     assert_eq!(sum, 200);
 }
 
 #[test]
 fn test_t1_tui01_03_subminimum_terminal_alert_overlay() {
-    // Test terminal smaller than 80x24 minimum requirement
+    // Test terminal smaller than MIN_WIDTH x MIN_HEIGHT requirement
     let small_areas = [
-        Rect::new(0, 0, 79, 40),  // Too narrow
-        Rect::new(0, 0, 120, 23), // Too short
+        Rect::new(0, 0, AppLayout::MIN_WIDTH - 1, 40),  // Too narrow
+        Rect::new(0, 0, 120, AppLayout::MIN_HEIGHT - 1), // Too short
         Rect::new(0, 0, 40, 10),  // Extremely tiny
         Rect::new(0, 0, 10, 5),
     ];
@@ -88,10 +85,10 @@ fn test_t1_tui01_03_subminimum_terminal_alert_overlay() {
         assert_eq!(layout.library_area.width, 0);
     }
 
-    // Boundary check at exactly 80x24 threshold
-    let exact_min = Rect::new(0, 0, 80, 24);
+    // Boundary check at exactly minimum threshold
+    let exact_min = Rect::new(0, 0, AppLayout::MIN_WIDTH, AppLayout::MIN_HEIGHT);
     let layout_exact = AppLayout::compute(exact_min);
-    assert!(!layout_exact.is_too_small, "80x24 must be accepted");
+    assert!(!layout_exact.is_too_small, "Minimum dimensions must be accepted");
     assert!(layout_exact.preview_area.width > 0);
 }
 
@@ -99,17 +96,13 @@ fn test_t1_tui01_03_subminimum_terminal_alert_overlay() {
 fn test_t1_tui01_04_tab_focus_ring_traversal() {
     let mut focus = PaneId::Library;
 
-    // Forward cycle: Library -> PreviewCanvas -> Inspector -> Library
+    // Forward cycle: Library -> PreviewCanvas -> Library
     focus = focus.next();
     assert_eq!(focus, PaneId::PreviewCanvas);
     focus = focus.next();
-    assert_eq!(focus, PaneId::Inspector);
-    focus = focus.next();
     assert_eq!(focus, PaneId::Library);
 
-    // Reverse cycle: Library -> Inspector -> PreviewCanvas -> Library
-    focus = focus.prev();
-    assert_eq!(focus, PaneId::Inspector);
+    // Reverse cycle: Library -> PreviewCanvas -> Library
     focus = focus.prev();
     assert_eq!(focus, PaneId::PreviewCanvas);
     focus = focus.prev();
@@ -128,10 +121,6 @@ fn test_t1_tui01_05_mouse_hit_testing_panes() {
     // Hit test inside Preview Canvas pane
     let canvas_point = (layout.preview_area.x + 10, layout.preview_area.y + 10);
     assert_eq!(layout.pane_at(canvas_point.0, canvas_point.1), Some(PaneId::PreviewCanvas));
-
-    // Hit test inside Inspector pane
-    let insp_point = (layout.inspector_area.x + 5, layout.inspector_area.y + 5);
-    assert_eq!(layout.pane_at(insp_point.0, insp_point.1), Some(PaneId::Inspector));
 
     // Hit test inside Status Bar
     let status_point = (layout.status_area.x + 10, layout.status_area.y + 1);
@@ -280,7 +269,7 @@ async fn test_t1_tui02_04_ratatui_test_backend_full_render() {
     assert!(content.contains("LightCraft TUI"));
     assert!(content.contains("Mode A"));
     assert!(content.contains("1. BIBLIOTECA"));
-    assert!(content.contains("3. INSPECTOR"));
+    assert!(!content.contains("3. INSPECTOR"));
     assert!(content.contains("Panel Activo"));
 }
 
@@ -364,18 +353,18 @@ async fn test_mouse_focus_bounds_stabilized() {
     .unwrap();
     assert_eq!(app.focused_pane, PaneId::Library);
 
-    // Click inside Inspector panel
-    let insp_x = layout.inspector_area.x + 2;
-    let insp_y = layout.inspector_area.y + 2;
+    // Click inside PreviewCanvas panel
+    let canvas_x = layout.preview_area.x + 2;
+    let canvas_y = layout.preview_area.y + 2;
     app.handle_event(lightcraft_tui::tui::event::AppEvent::Mouse(MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
-        column: insp_x,
-        row: insp_y,
+        column: canvas_x,
+        row: canvas_y,
         modifiers: crossterm::event::KeyModifiers::empty(),
     }))
     .await
     .unwrap();
-    assert_eq!(app.focused_pane, PaneId::Inspector);
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
 
     // Click outside in header area (y = 0) -> focus must NOT change
     app.handle_event(lightcraft_tui::tui::event::AppEvent::Mouse(MouseEvent {
@@ -386,7 +375,7 @@ async fn test_mouse_focus_bounds_stabilized() {
     }))
     .await
     .unwrap();
-    assert_eq!(app.focused_pane, PaneId::Inspector, "Header click must not alter focused pane");
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas, "Header click must not alter focused pane");
 }
 
 #[tokio::test]

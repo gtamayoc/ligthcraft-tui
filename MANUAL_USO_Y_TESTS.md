@@ -127,24 +127,25 @@ Tokens admitidos por el motor de nombrado:
 ```
 ┌──────────────────────────────────────────────────────────────────────────────┐
 │ LightCraft TUI v0.1.0 │ Modo: SINGLE PHOTO (A) │ Protocolo: Auto (Halfblocks)│
-├─────────────────────┬───────────────────────────────┬────────────────────────┤
-│ 1. BIBLIOTECA       │ 2. PREVISUALIZADOR            │ 3. INSPECTOR           │
-│ (RAW/Imágenes)      │ (Lienzo Central de Variantes) │ (Metadatos y Sliders)  │
-│                     │                               │                        │
-│ ► [x] IMG_0588.CR3  │   [Hero / 2x2 Grid / Split]   │ Foto: IMG_0588.CR3     │
-│   [ ] IMG_0589.CR3  │                               │ 6000x4000 (24.0 MP)    │
-│   [ ] IMG_0590.CR3  │   Variant 1  │  Variant 2     │ 1/500s  f/2.8  ISO 400 │
-│   [ ] IMG_0969.CR3  │   ───────────┼───────────     │ Preset: Cinema         │
-│   [ ] IMG_0981.CR3  │   Variant 3  │  Variant 4     │ Intensidad: 100%       │
-├─────────────────────┴───────────────────────────────┴────────────────────────┤
-│ Foto 1/5 │ Panel Activo: [1. BIBLIOTECA] │ [Tab]: Ir a Canvas │ [E]: Exportar │
+├─────────────────────┬────────────────────────────────────────────────────────┤
+│ 1. BIBLIOTECA       │ 2. PREVISUALIZADOR                                     │
+│ (RAW/Imágenes 20%)  │ (Lienzo Central de Imagen y Variantes 80%)             │
+│                     │                                                        │
+│ ► [x] IMG_0588.CR3  │   [Hero / 2x2 Grid / Split]                            │
+│   [ ] IMG_0589.CR3  │                                                        │
+│   [ ] IMG_0590.CR3  │   Variant 1            │  Variant 2                    │
+│   [ ] IMG_0969.CR3  │   ─────────────────────┼────────────────────           │
+│   [ ] IMG_0981.CR3  │   Variant 3            │  Variant 4                    │
+├─────────────────────┴────────────────────────────────────────────────────────┤
+│ Foto 1/5 │ Panel Activo: [1. BIBLIOTECA] │ [Tab]: Canvas │ [F5]: Refrescar   │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 4.2. Cómo Cambiar el Foco entre Paneles
 Puedes cambiar el foco de dos maneras:
-1. **Teclado:** Pulsa `Tab` para avanzar cíclicamente entre `1. BIBLIOTECA` ➔ `2. PREVISUALIZADOR` ➔ `3. INSPECTOR`. Pulsa `Shift + Tab` (`BackTab`) para ir en sentido inverso.
-2. **Ratón:** Haz clic izquierdo dentro de cualquiera de los 3 paneles. El sistema detecta las coordenadas exactas y activa el panel clicado inmediatamente.
+1. **Teclado:** Pulsa `Tab` para conmutar cíclicamente entre `1. BIBLIOTECA` ⟷ `2. PREVISUALIZADOR`. Pulsa `Shift + Tab` (`BackTab`) para alternar en sentido inverso.
+2. **Ratón:** Haz clic izquierdo dentro de cualquiera de los 2 paneles interactivos. El sistema detecta las coordenadas y activa el panel clicado inmediatamente.
+3. **Restablecer / Refrescar Vista:** Pulsa `F5` en cualquier momento para limpiar el buffer de pantalla, forzar un repintado completo y corregir distorsiones visuales si redimensionaste la consola.
 
 ### 4.3. Flujo Operativo Completo en Modo A (Inspección y Variantes)
 
@@ -198,8 +199,9 @@ Puedes cambiar el foco de dos maneras:
 ### Globales
 | Atajo | Función |
 | :--- | :--- |
-| `Tab` | Avanzar foco: Biblioteca ➔ Lienzo Previsualizador ➔ Inspector |
+| `Tab` | Alternar foco: Biblioteca (1) ⟷ Lienzo Previsualizador (2) |
 | `Shift + Tab` | Retroceder foco de panel |
+| `F5` | Restablecer buffer del terminal, limpiar distorsiones y refrescar layout |
 | `F10` o `m` / `M` | Alternar entre Modo A (Single) y Modo B (Batch) |
 | `q` o `Ctrl + C` | Salir de LightCraft TUI |
 

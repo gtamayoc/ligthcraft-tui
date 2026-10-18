@@ -9,7 +9,6 @@ use ratatui::widgets::{Block, BorderType, Borders};
 pub enum PaneId {
     Library,
     PreviewCanvas,
-    Inspector,
     QueueStatus,
 }
 
@@ -18,8 +17,7 @@ impl PaneId {
     pub fn next(&self) -> Self {
         match self {
             Self::Library => Self::PreviewCanvas,
-            Self::PreviewCanvas => Self::Inspector,
-            Self::Inspector => Self::Library,
+            Self::PreviewCanvas => Self::Library,
             Self::QueueStatus => Self::Library,
         }
     }
@@ -27,10 +25,9 @@ impl PaneId {
     /// Cycle focus backward to the previous interactive pane.
     pub fn prev(&self) -> Self {
         match self {
-            Self::Library => Self::Inspector,
+            Self::Library => Self::PreviewCanvas,
             Self::PreviewCanvas => Self::Library,
-            Self::Inspector => Self::PreviewCanvas,
-            Self::QueueStatus => Self::Inspector,
+            Self::QueueStatus => Self::PreviewCanvas,
         }
     }
 }
@@ -42,14 +39,13 @@ pub struct AppLayout {
     pub header_area: Rect,
     pub library_area: Rect,
     pub preview_area: Rect,
-    pub inspector_area: Rect,
     pub status_area: Rect,
     pub is_too_small: bool,
 }
 
 impl AppLayout {
-    pub const MIN_WIDTH: u16 = 80;
-    pub const MIN_HEIGHT: u16 = 24;
+    pub const MIN_WIDTH: u16 = 60;
+    pub const MIN_HEIGHT: u16 = 20;
 
     /// Compute responsive pane rects for given terminal bounds.
     pub fn compute(area: Rect) -> Self {
@@ -59,7 +55,6 @@ impl AppLayout {
                 header_area: Rect::default(),
                 library_area: Rect::default(),
                 preview_area: Rect::default(),
-                inspector_area: Rect::default(),
                 status_area: Rect::default(),
                 is_too_small: true,
             };
@@ -83,24 +78,16 @@ impl AppLayout {
         let middle_area = vert_chunks[1];
         let status_area = vert_chunks[2];
 
-        // 2. Middle horizontal split: [Library, Preview Canvas, Inspector]
-        let horiz_constraints = if area.width >= 160 {
+        // 2. Middle horizontal split: [Library, Preview Canvas]
+        let horiz_constraints = if area.width >= 120 {
             [
                 Constraint::Percentage(20), // Library: 20%
-                Constraint::Percentage(55), // Canvas: 55%
-                Constraint::Percentage(25), // Inspector: 25%
-            ]
-        } else if area.width >= 120 {
-            [
-                Constraint::Percentage(22),
-                Constraint::Percentage(52),
-                Constraint::Percentage(26),
+                Constraint::Percentage(80), // Canvas: 80%
             ]
         } else {
             [
                 Constraint::Length(22), // Compact fixed library
-                Constraint::Min(36),    // Flexible canvas
-                Constraint::Length(26), // Compact fixed inspector
+                Constraint::Min(38),    // Flexible canvas
             ]
         };
 
@@ -114,7 +101,6 @@ impl AppLayout {
             header_area,
             library_area: middle_chunks[0],
             preview_area: middle_chunks[1],
-            inspector_area: middle_chunks[2],
             status_area,
             is_too_small: false,
         }
@@ -127,8 +113,6 @@ impl AppLayout {
             Some(PaneId::Library)
         } else if contains(self.preview_area, pt) {
             Some(PaneId::PreviewCanvas)
-        } else if contains(self.inspector_area, pt) {
-            Some(PaneId::Inspector)
         } else if contains(self.status_area, pt) {
             Some(PaneId::QueueStatus)
         } else {

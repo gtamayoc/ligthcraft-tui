@@ -62,7 +62,6 @@ fn test_adv_layout_tiny_and_subminimum_dimensions() {
             assert_eq!(layout.header_area.width, 0);
             assert_eq!(layout.library_area.width, 0);
             assert_eq!(layout.preview_area.width, 0);
-            assert_eq!(layout.inspector_area.width, 0);
             assert_eq!(layout.status_area.width, 0);
         }
 
@@ -75,24 +74,23 @@ fn test_adv_layout_tiny_and_subminimum_dimensions() {
 
 #[test]
 fn test_adv_layout_exact_boundary_thresholds() {
-    // Exact minimum threshold is 80x24
-    let exact_min = Rect::new(0, 0, 80, 24);
+    // Exact minimum threshold is 60x20
+    let exact_min = Rect::new(0, 0, AppLayout::MIN_WIDTH, AppLayout::MIN_HEIGHT);
     let layout_min = AppLayout::compute(exact_min);
-    assert!(!layout_min.is_too_small, "80x24 must satisfy minimum dimensions");
+    assert!(!layout_min.is_too_small, "60x20 must satisfy minimum dimensions");
     assert_eq!(layout_min.header_area.height, 1);
     assert_eq!(layout_min.status_area.height, 2);
-    assert_eq!(layout_min.library_area.height, 21);
-    assert_eq!(layout_min.preview_area.height, 21);
-    assert_eq!(layout_min.inspector_area.height, 21);
+    assert_eq!(layout_min.library_area.height, 17);
+    assert_eq!(layout_min.preview_area.height, 17);
     assert!(layout_min.preview_area.width > 0);
 
     // One pixel below in either axis must fail
-    assert!(AppLayout::compute(Rect::new(0, 0, 79, 24)).is_too_small);
-    assert!(AppLayout::compute(Rect::new(0, 0, 80, 23)).is_too_small);
-    assert!(AppLayout::compute(Rect::new(0, 0, 79, 23)).is_too_small);
+    assert!(AppLayout::compute(Rect::new(0, 0, AppLayout::MIN_WIDTH - 1, AppLayout::MIN_HEIGHT)).is_too_small);
+    assert!(AppLayout::compute(Rect::new(0, 0, AppLayout::MIN_WIDTH, AppLayout::MIN_HEIGHT - 1)).is_too_small);
+    assert!(AppLayout::compute(Rect::new(0, 0, AppLayout::MIN_WIDTH - 1, AppLayout::MIN_HEIGHT - 1)).is_too_small);
 
     // One pixel above in both axes must succeed
-    assert!(!AppLayout::compute(Rect::new(0, 0, 81, 25)).is_too_small);
+    assert!(!AppLayout::compute(Rect::new(0, 0, AppLayout::MIN_WIDTH + 1, AppLayout::MIN_HEIGHT + 1)).is_too_small);
 }
 
 #[test]
@@ -117,7 +115,7 @@ fn test_adv_layout_breakpoint_transitions_no_gap_or_overlap() {
             );
 
             // Verify horizontal split partition
-            let horiz_sum = layout.library_area.width + layout.preview_area.width + layout.inspector_area.width;
+            let horiz_sum = layout.library_area.width + layout.preview_area.width;
             assert_eq!(
                 horiz_sum, w,
                 "Horizontal panes width sum ({}) must equal terminal width ({}) for {}x{}",
@@ -188,11 +186,11 @@ fn test_adv_layout_rapid_resize_bursts_60_cycles() {
         let area = Rect::new(0, 0, w, h);
         let layout = AppLayout::compute(area);
 
-        if w < 80 || h < 24 {
+        if w < AppLayout::MIN_WIDTH || h < AppLayout::MIN_HEIGHT {
             assert!(layout.is_too_small, "Step {}: {}x{} must be too small", step, w, h);
         } else {
             assert!(!layout.is_too_small, "Step {}: {}x{} must be valid", step, w, h);
-            let sum_w = layout.library_area.width + layout.preview_area.width + layout.inspector_area.width;
+            let sum_w = layout.library_area.width + layout.preview_area.width;
             assert_eq!(sum_w, w, "Step {}: width mismatch", step);
         }
     }
