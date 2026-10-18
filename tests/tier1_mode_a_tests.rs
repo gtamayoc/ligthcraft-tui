@@ -454,7 +454,7 @@ async fn test_variant_export_prompt_and_cancellation() {
     app.handle_key(space_key).await.unwrap();
     assert!(app.mode_a.variants[0].is_selected);
 
-    // Press 'E' to trigger export prompt
+    // Press 'E' to trigger export wizard (Step 3: Aspect Ratios)
     let e_key = KeyEvent {
         code: KeyCode::Char('e'),
         modifiers: KeyModifiers::empty(),
@@ -462,12 +462,13 @@ async fn test_variant_export_prompt_and_cancellation() {
         state: KeyEventState::empty(),
     };
     app.handle_key(e_key).await.unwrap();
-    assert!(app.export_prompt, "Export prompt should be active");
-    assert!(app
-        .status_message
-        .contains("Exportación: 1 variante(s) seleccionada(s)"));
+    assert!(app.flow_state.is_active, "Wizard should be active");
+    assert_eq!(
+        app.flow_state.step,
+        lightcraft_tui::export::aspect::WizardStep::AspectRatios
+    );
 
-    // Press Esc to cancel prompt
+    // Press Esc to cancel wizard
     let esc_key = KeyEvent {
         code: KeyCode::Esc,
         modifiers: KeyModifiers::empty(),
@@ -475,8 +476,7 @@ async fn test_variant_export_prompt_and_cancellation() {
         state: KeyEventState::empty(),
     };
     app.handle_key(esc_key).await.unwrap();
-    assert!(!app.export_prompt, "Export prompt should be cancelled");
-    assert_eq!(app.status_message, "Exportación cancelada.");
+    assert!(!app.flow_state.is_active, "Wizard should be cancelled");
 }
 
 #[tokio::test]
@@ -512,34 +512,262 @@ async fn test_variant_batch_export_execution() {
     app.mode_a.toggle_selection();
     assert_eq!(app.mode_a.get_selected_or_focused_indices(), vec![0, 1]);
 
-    // Press 'E' to trigger export prompt
-    let e_key = KeyEvent {
-        code: KeyCode::Char('e'),
+    // Press 'E' to trigger wizard
+    let make_k = |code: KeyCode| KeyEvent {
+        code,
         modifiers: KeyModifiers::empty(),
         kind: KeyEventKind::Press,
         state: KeyEventState::empty(),
     };
-    app.handle_key(e_key).await.unwrap();
-    assert!(app.export_prompt);
+    app.handle_key(make_k(KeyCode::Char('e'))).await.unwrap();
+    assert!(app.flow_state.is_active);
+    assert_eq!(
+        app.flow_state.step,
+        lightcraft_tui::export::aspect::WizardStep::AspectRatios
+    );
 
-    // Press '1' to choose TIFF export
-    let key_1 = KeyEvent {
-        code: KeyCode::Char('1'),
-        modifiers: KeyModifiers::empty(),
-        kind: KeyEventKind::Press,
-        state: KeyEventState::empty(),
-    };
-    app.handle_key(key_1).await.unwrap();
-    assert!(!app.export_prompt);
+    // Advance to FileFormats with Enter
+    app.handle_key(make_k(KeyCode::Enter)).await.unwrap();
+    assert_eq!(
+        app.flow_state.step,
+        lightcraft_tui::export::aspect::WizardStep::FileFormats
+    );
+
+    // Choose TIFF with '1' and advance to Summary
+    app.handle_key(make_k(KeyCode::Char('1'))).await.unwrap();
+    app.handle_key(make_k(KeyCode::Enter)).await.unwrap();
+    assert_eq!(
+        app.flow_state.step,
+        lightcraft_tui::export::aspect::WizardStep::Summary
+    );
+
+    // Execute with Enter
+    app.handle_key(make_k(KeyCode::Enter)).await.unwrap();
+    assert!(!app.flow_state.is_active);
 
     if !app.items.is_empty() {
         assert!(
-            app.status_message.contains("Guardado OK")
-                && app.status_message.contains("TIFF 16-bit")
+            app.status_message.contains("Exportación completada")
+                || app.status_message.contains("Guardado OK")
         );
     }
 
     // Selections should be cleared after export
     assert!(!app.mode_a.variants[0].is_selected);
     assert!(!app.mode_a.variants[1].is_selected);
+}
+
+#[tokio::test]
+async fn test_flow_export_cancellation_confirmation_dismissal() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use lightcraft_tui::app::AppController;
+    use lightcraft_tui::export::aspect::WizardStep;
+    use lightcraft_tui::graphics::protocol::ProtocolOverride;
+    use lightcraft_tui::mcp::client::{McpClient, McpClientConfig};
+    use lightcraft_tui::storage::presets_store::PresetStore;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
+
+    let make_k = |code: KeyCode| KeyEvent {
+        code,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+
+    // Simulate flow actively exporting
+    app.flow_state.is_active = true;
+    app.flow_state.step = WizardStep::Exporting;
+    app.flow_state.is_confirming_cancel = false;
+
+    // Press Esc -> should enter confirmation mode instead of silently cancelling
+    app.handle_flow_key(make_k(KeyCode::Esc)).await.unwrap();
+    assert!(app.flow_state.is_active, "Wizard should still be active");
+    assert!(
+        app.flow_state.is_confirming_cancel,
+        "Should be in confirmation prompt"
+    );
+    assert!(app
+        .status_message
+        .contains("¿Desea cancelar la exportación en curso?"));
+
+    // Press 'N' -> dismiss confirmation and continue exporting
+    app.handle_flow_key(make_k(KeyCode::Char('n'))).await.unwrap();
+    assert!(app.flow_state.is_active, "Wizard should still be active");
+    assert!(
+        !app.flow_state.is_confirming_cancel,
+        "Confirmation prompt should be dismissed"
+    );
+    assert!(app.status_message.contains("Cancelación descartada"));
+
+    // Press Esc again -> confirm prompt shows again
+    app.handle_flow_key(make_k(KeyCode::Esc)).await.unwrap();
+    assert!(app.flow_state.is_confirming_cancel);
+
+    // Press Esc again -> dismisses prompt
+    app.handle_flow_key(make_k(KeyCode::Esc)).await.unwrap();
+    assert!(!app.flow_state.is_confirming_cancel);
+}
+
+#[tokio::test]
+async fn test_flow_export_cancellation_confirmed_and_event_handling() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use lightcraft_tui::app::AppController;
+    use lightcraft_tui::export::aspect::WizardStep;
+    use lightcraft_tui::graphics::protocol::ProtocolOverride;
+    use lightcraft_tui::mcp::client::{McpClient, McpClientConfig};
+    use lightcraft_tui::storage::presets_store::PresetStore;
+    use lightcraft_tui::tui::event::AppEvent;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use tokio_util::sync::CancellationToken;
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
+
+    let make_k = |code: KeyCode| KeyEvent {
+        code,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+
+    let cancel_token = CancellationToken::new();
+    app.flow_cancel_token = Some(cancel_token.clone());
+    app.flow_state.is_active = true;
+    app.flow_state.step = WizardStep::Exporting;
+    app.flow_state.is_confirming_cancel = false;
+
+    // Press Esc -> show prompt
+    app.handle_flow_key(make_k(KeyCode::Esc)).await.unwrap();
+    assert!(app.flow_state.is_confirming_cancel);
+    assert!(!cancel_token.is_cancelled());
+
+    // Press 'S' -> confirm cancellation
+    app.handle_flow_key(make_k(KeyCode::Char('s'))).await.unwrap();
+    assert!(cancel_token.is_cancelled(), "Token must be cancelled");
+    assert!(!app.flow_state.is_confirming_cancel);
+    assert!(app.status_message.contains("Deteniendo exportación"));
+
+    // EventManager dispatches FlowExportCancelled event to AppController
+    app.handle_event(AppEvent::FlowExportCancelled {
+        processed: 7,
+        total: 72,
+        cancelled: 65,
+    })
+    .await
+    .unwrap();
+
+    assert!(
+        !app.flow_state.is_active,
+        "Flow must be closed on cancellation"
+    );
+    assert!(app.flow_cancel_token.is_none(), "Token reference cleared");
+    assert!(
+        app.status_message.contains(
+            "Exportación cancelada por el usuario. 7 de 72 fotos guardadas, 65 omitidas."
+        ),
+        "Actual status: {}",
+        app.status_message
+    );
+}
+
+#[tokio::test]
+async fn test_flow_export_async_cancellation_token_stops_loop() {
+    use lightcraft_tui::app::AppController;
+    use lightcraft_tui::graphics::protocol::ProtocolOverride;
+    use lightcraft_tui::mcp::client::{McpClient, McpClientConfig};
+    use lightcraft_tui::storage::presets_store::PresetStore;
+    use lightcraft_tui::tui::event::AppEvent;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
+
+    let (tx, mut rx) = mpsc::channel(64);
+    app.event_sender = Some(tx);
+    app.mode_a.variant_count = 4;
+    app.flow_state.start_with_variants(vec![0, 1, 2, 3]);
+    app.flow_state.selected_formats = vec![
+        lightcraft_tui::export::OutputFormat::Tiff,
+        lightcraft_tui::export::OutputFormat::Jpeg,
+    ];
+
+    // Trigger async batch export
+    app.execute_flow_export_batch().await.unwrap();
+    let token = app
+        .flow_cancel_token
+        .clone()
+        .expect("Token should be registered");
+
+    // Immediately cancel the token to simulate user pressing ESC + S during export
+    token.cancel();
+
+    // Collect events emitted by the background task
+    let mut got_cancelled_event = false;
+    let mut got_finished_event = false;
+
+    // Timeout loop up to 5 seconds
+    let timeout = tokio::time::sleep(std::time::Duration::from_secs(5));
+    tokio::pin!(timeout);
+
+    loop {
+        tokio::select! {
+            Some(event) = rx.recv() => {
+                match event {
+                    AppEvent::FlowExportCancelled { processed, total, cancelled } => {
+                        got_cancelled_event = true;
+                        assert_eq!(processed + cancelled, total);
+                        break;
+                    }
+                    AppEvent::FlowExportFinished { .. } => {
+                        got_finished_event = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            _ = &mut timeout => {
+                panic!("Timed out waiting for FlowExportCancelled event");
+            }
+        }
+    }
+
+    assert!(
+        got_cancelled_event,
+        "Background export task must emit FlowExportCancelled when token is cancelled"
+    );
+    assert!(
+        !got_finished_event,
+        "Background export task must not finish normally when cancelled"
+    );
 }

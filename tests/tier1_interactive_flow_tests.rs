@@ -179,9 +179,12 @@ async fn test_top_wizard_banner_rendering_all_steps() {
 
     // Test rendering on each step
     let steps = [
+        WizardStep::Photos,
+        WizardStep::Variants,
         WizardStep::AspectRatios,
         WizardStep::FileFormats,
         WizardStep::Summary,
+        WizardStep::Exporting,
         WizardStep::SavePreset,
     ];
 
@@ -191,6 +194,110 @@ async fn test_top_wizard_banner_rendering_all_steps() {
     }
 
     assert!(app.flow_state.is_active);
+}
+
+#[tokio::test]
+async fn test_interactive_wizard_arrow_navigation_space_toggle_and_render_progress() {
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
+
+    app.focused_pane = PaneId::PreviewCanvas;
+    app.mode_a.view_mode = ModeAView::VariantMatrix;
+
+    // Launch wizard with 'e' -> Step 3: AspectRatios
+    app.handle_key(make_key(KeyCode::Char('e'))).await.unwrap();
+    assert_eq!(app.flow_state.step, WizardStep::AspectRatios);
+    assert_eq!(app.flow_state.focused_ratio_idx, 0); // starts at index 0 (1:1 Cuadrado)
+
+    // 1. Arrow navigation: Right arrow moves cursor 0 -> 1 -> 2
+    app.handle_key(make_key(KeyCode::Right)).await.unwrap();
+    assert_eq!(app.flow_state.focused_ratio_idx, 1);
+    app.handle_key(make_key(KeyCode::Right)).await.unwrap();
+    assert_eq!(app.flow_state.focused_ratio_idx, 2);
+
+    // Left arrow moves cursor 2 -> 1
+    app.handle_key(make_key(KeyCode::Left)).await.unwrap();
+    assert_eq!(app.flow_state.focused_ratio_idx, 1);
+
+    // 2. Space toggles the focused option (index 1 is 3:2 Photo)
+    assert!(!app
+        .flow_state
+        .selected_ratios
+        .contains(&AspectRatio::Photo3x2));
+    app.handle_key(make_key(KeyCode::Char(' '))).await.unwrap();
+    assert!(app
+        .flow_state
+        .selected_ratios
+        .contains(&AspectRatio::Photo3x2));
+
+    // Move to index 3 (16:9) with Right, Right and toggle with Space
+    app.handle_key(make_key(KeyCode::Right)).await.unwrap();
+    app.handle_key(make_key(KeyCode::Right)).await.unwrap();
+    assert_eq!(app.flow_state.focused_ratio_idx, 3);
+    app.handle_key(make_key(KeyCode::Char(' '))).await.unwrap();
+    assert!(app
+        .flow_state
+        .selected_ratios
+        .contains(&AspectRatio::Widescreen16x9));
+
+    // 3. Press Enter to confirm and advance to Step 4 (FileFormats)
+    app.handle_key(make_key(KeyCode::Enter)).await.unwrap();
+    assert_eq!(app.flow_state.step, WizardStep::FileFormats);
+    assert_eq!(app.flow_state.focused_format_idx, 0);
+
+    // Navigate with Right arrow 0 -> 1 (JPEG) and Space toggle
+    app.handle_key(make_key(KeyCode::Right)).await.unwrap();
+    assert_eq!(app.flow_state.focused_format_idx, 1);
+    app.handle_key(make_key(KeyCode::Char(' '))).await.unwrap();
+    assert!(app
+        .flow_state
+        .selected_formats
+        .contains(&OutputFormat::Tiff));
+    assert!(app
+        .flow_state
+        .selected_formats
+        .contains(&OutputFormat::Jpeg));
+
+    // Press Enter to advance to Step 5 (Summary)
+    app.handle_key(make_key(KeyCode::Enter)).await.unwrap();
+    assert_eq!(app.flow_state.step, WizardStep::Summary);
+    assert_eq!(app.flow_state.focused_summary_idx, 0);
+
+    // 4. Arrow navigation in Summary: Right moves 0 -> 1 -> 2
+    app.handle_key(make_key(KeyCode::Right)).await.unwrap();
+    assert_eq!(app.flow_state.focused_summary_idx, 1);
+    app.handle_key(make_key(KeyCode::Left)).await.unwrap();
+    assert_eq!(app.flow_state.focused_summary_idx, 0);
+
+    // 5. Test Live Progress Events
+    let progress_event = lightcraft_tui::tui::event::AppEvent::FlowExportProgress {
+        completed: 2,
+        total: 4,
+        current_label: "var1__16x9.jpeg".into(),
+        percent: 50.0,
+    };
+    app.handle_event(progress_event).await.unwrap();
+    assert_eq!(app.flow_state.export_completed, 2);
+    assert_eq!(app.flow_state.export_total, 4);
+    assert_eq!(app.flow_state.export_percent, 50.0);
+
+    // Finish event closes wizard cleanly and leaves status message
+    let finished_event = lightcraft_tui::tui::event::AppEvent::FlowExportFinished {
+        successful: 4,
+        total: 4,
+        output_dir: "export/interactive".into(),
+    };
+    app.handle_event(finished_event).await.unwrap();
+    assert!(!app.flow_state.is_active);
+    assert!(app.status_message.contains("Exportación completada"));
 }
 
 #[tokio::test]
@@ -217,4 +324,46 @@ async fn test_aspect_ratio_geometric_center_crops() {
     let (x, y, w, h) = calculate_center_crop(3000, 3000, AspectRatio::Photo3x2);
     // 3000 width -> height = 3000 * 2 / 3 = 2000. y = (3000 - 2000) / 2 = 500
     assert_eq!((x, y, w, h), (0, 500, 3000, 2000));
+}
+
+#[tokio::test]
+async fn test_panel1_startup_navigation_without_space_and_enter_confirm() {
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
+
+    // 1. Panel 1 is focused at startup, initial photo is auto-selected
+    assert_eq!(app.focused_pane, PaneId::Library);
+    assert_eq!(app.selected_index, 0);
+    if !app.items.is_empty() {
+        assert!(app.items[0].is_selected);
+    }
+
+    // 2. Immediate arrow navigation Down WITHOUT needing Space
+    if app.items.len() >= 2 {
+        app.handle_key(make_key(KeyCode::Down)).await.unwrap();
+        assert_eq!(app.selected_index, 1);
+        // Automatically selects newly focused photo and deselects previous single selection
+        assert!(!app.items[0].is_selected);
+        assert!(app.items[1].is_selected);
+
+        // Arrow navigation Up returns to first photo
+        app.handle_key(make_key(KeyCode::Up)).await.unwrap();
+        assert_eq!(app.selected_index, 0);
+        assert!(app.items[0].is_selected);
+        assert!(!app.items[1].is_selected);
+    }
+
+    // 3. Press Enter in Panel 1 confirms photo and advances to Panel 2 (Variants)
+    app.handle_key(make_key(KeyCode::Enter)).await.unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+    assert_eq!(app.mode_a.view_mode, ModeAView::VariantMatrix);
+    assert!(app.status_message.contains("Paso 1 confirmado"));
 }

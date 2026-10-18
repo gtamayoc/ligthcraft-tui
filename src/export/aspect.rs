@@ -134,45 +134,62 @@ pub fn calculate_center_crop(orig_w: u32, orig_h: u32, ratio: AspectRatio) -> (u
 /// Active step within the top interactive wizard flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WizardStep {
+    Photos,
     #[default]
     Variants,
     AspectRatios,
     FileFormats,
     Summary,
+    Exporting,
     SavePreset,
 }
 
 impl WizardStep {
     pub fn step_number(&self) -> usize {
         match self {
+            Self::Photos => 1,
             Self::Variants => 2,
             Self::AspectRatios => 3,
             Self::FileFormats => 4,
             Self::Summary => 5,
+            Self::Exporting => 6,
             Self::SavePreset => 5,
         }
     }
 
     pub fn title(&self) -> &'static str {
         match self {
-            Self::Variants => "PASO 2/5: VARIANTES",
-            Self::AspectRatios => "PASO 3/5: PROPORCIONES (ASPECT RATIOS)",
-            Self::FileFormats => "PASO 4/5: FORMATOS DE SALIDA",
-            Self::Summary => "PASO 5/5: RESUMEN Y CONFIRMACIÓN",
+            Self::Photos => "PASO 1/6: ENTRADA DE FOTOS",
+            Self::Variants => "PASO 2/6: VARIANTES Y REVELADO",
+            Self::AspectRatios => "PASO 3/6: PROPORCIONES (ASPECT RATIOS)",
+            Self::FileFormats => "PASO 4/6: FORMATOS DE SALIDA",
+            Self::Summary => "PASO 5/6: RESUMEN Y CONFIRMACIÓN",
+            Self::Exporting => "PASO 6/6: RENDERIZADO / EXPORTACIÓN EN PROCESO",
             Self::SavePreset => "GUARDAR CONFIGURACIÓN COMO PRESET",
         }
     }
 }
 
 /// Runtime state for the top-banner interactive wizard flow.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct InteractiveFlowState {
     pub is_active: bool,
     pub step: WizardStep,
     pub selected_variants: Vec<usize>,
     pub selected_ratios: Vec<AspectRatio>,
     pub selected_formats: Vec<crate::export::OutputFormat>,
+    pub focused_ratio_idx: usize,
+    pub focused_format_idx: usize,
+    pub focused_summary_idx: usize,
+    pub export_completed: usize,
+    pub export_total: usize,
+    pub export_current_label: String,
+    pub export_percent: f32,
+    pub export_start_time: Option<std::time::Instant>,
+    pub is_confirming_cancel: bool,
 }
+
+impl Eq for InteractiveFlowState {}
 
 impl Default for InteractiveFlowState {
     fn default() -> Self {
@@ -182,6 +199,15 @@ impl Default for InteractiveFlowState {
             selected_variants: Vec::new(),
             selected_ratios: vec![AspectRatio::Original],
             selected_formats: vec![crate::export::OutputFormat::Tiff],
+            focused_ratio_idx: 0,
+            focused_format_idx: 0,
+            focused_summary_idx: 0,
+            export_completed: 0,
+            export_total: 0,
+            export_current_label: String::new(),
+            export_percent: 0.0,
+            export_start_time: None,
+            is_confirming_cancel: false,
         }
     }
 }
@@ -195,6 +221,9 @@ impl InteractiveFlowState {
         self.is_active = true;
         self.step = WizardStep::AspectRatios;
         self.selected_variants = variants;
+        self.focused_ratio_idx = 0;
+        self.focused_format_idx = 0;
+        self.focused_summary_idx = 0;
         if self.selected_ratios.is_empty() {
             self.selected_ratios = vec![AspectRatio::Original];
         }
@@ -213,6 +242,122 @@ impl InteractiveFlowState {
         }
     }
 
+    pub fn prev_ratio(&mut self) {
+        // 7 options: 6 AspectRatio variants + 1 "All"
+        if self.focused_ratio_idx > 0 {
+            self.focused_ratio_idx -= 1;
+        } else {
+            self.focused_ratio_idx = 6;
+        }
+    }
+
+    pub fn next_ratio(&mut self) {
+        if self.focused_ratio_idx < 6 {
+            self.focused_ratio_idx += 1;
+        } else {
+            self.focused_ratio_idx = 0;
+        }
+    }
+
+    pub fn toggle_focused_ratio(&mut self) {
+        match self.focused_ratio_idx {
+            0 => self.toggle_ratio(AspectRatio::Square1x1),
+            1 => self.toggle_ratio(AspectRatio::Photo3x2),
+            2 => self.toggle_ratio(AspectRatio::Classic4x3),
+            3 => self.toggle_ratio(AspectRatio::Widescreen16x9),
+            4 => self.toggle_ratio(AspectRatio::Social4x5),
+            5 => self.toggle_ratio(AspectRatio::Original),
+            6 => {
+                if self.selected_ratios.len() == AspectRatio::ALL.len() {
+                    self.selected_ratios = vec![AspectRatio::Original];
+                } else {
+                    self.selected_ratios = AspectRatio::ALL.to_vec();
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn prev_format(&mut self) {
+        // 5 options: 0=TIFF, 1=JPEG, 2=PNG, 3=TIFF+JPEG, 4=Todos
+        if self.focused_format_idx > 0 {
+            self.focused_format_idx -= 1;
+        } else {
+            self.focused_format_idx = 4;
+        }
+    }
+
+    pub fn next_format(&mut self) {
+        if self.focused_format_idx < 4 {
+            self.focused_format_idx += 1;
+        } else {
+            self.focused_format_idx = 0;
+        }
+    }
+
+    pub fn toggle_focused_format(&mut self) {
+        match self.focused_format_idx {
+            0 => self.toggle_format(crate::export::OutputFormat::Tiff),
+            1 => self.toggle_format(crate::export::OutputFormat::Jpeg),
+            2 => self.toggle_format(crate::export::OutputFormat::Png),
+            3 => {
+                let has_both = self
+                    .selected_formats
+                    .contains(&crate::export::OutputFormat::Tiff)
+                    && self
+                        .selected_formats
+                        .contains(&crate::export::OutputFormat::Jpeg);
+                if has_both && self.selected_formats.len() == 2 {
+                    self.selected_formats = vec![crate::export::OutputFormat::Tiff];
+                } else {
+                    self.selected_formats = vec![
+                        crate::export::OutputFormat::Tiff,
+                        crate::export::OutputFormat::Jpeg,
+                    ];
+                }
+            }
+            4 => {
+                if self.selected_formats.len() == 3 {
+                    self.selected_formats = vec![crate::export::OutputFormat::Tiff];
+                } else {
+                    self.selected_formats = vec![
+                        crate::export::OutputFormat::Tiff,
+                        crate::export::OutputFormat::Jpeg,
+                        crate::export::OutputFormat::Png,
+                    ];
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn prev_summary(&mut self) {
+        // 6 options: 0=Confirm, 1=Edit Var, 2=Edit Ratio, 3=Edit Fmt, 4=Preset, 5=Cancel
+        if self.focused_summary_idx > 0 {
+            self.focused_summary_idx -= 1;
+        } else {
+            self.focused_summary_idx = 5;
+        }
+    }
+
+    pub fn next_summary(&mut self) {
+        if self.focused_summary_idx < 5 {
+            self.focused_summary_idx += 1;
+        } else {
+            self.focused_summary_idx = 0;
+        }
+    }
+
+    pub fn set_export_progress(&mut self, completed: usize, total: usize, label: String, pct: f32) {
+        self.export_completed = completed;
+        self.export_total = total;
+        self.export_current_label = label;
+        self.export_percent = pct;
+        if self.export_start_time.is_none() {
+            self.export_start_time = Some(std::time::Instant::now());
+        }
+    }
+
     pub fn toggle_format(&mut self, format: crate::export::OutputFormat) {
         if let Some(pos) = self.selected_formats.iter().position(|f| *f == format) {
             if self.selected_formats.len() > 1 {
@@ -226,6 +371,8 @@ impl InteractiveFlowState {
     pub fn close(&mut self) {
         self.is_active = false;
         self.step = WizardStep::Variants;
+        self.export_start_time = None;
+        self.is_confirming_cancel = false;
     }
 }
 

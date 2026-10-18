@@ -52,6 +52,25 @@ pub enum AppEvent {
         current_file: String,
         percent: f32,
     },
+    /// Interactive flow batch export progress update.
+    FlowExportProgress {
+        completed: usize,
+        total: usize,
+        current_label: String,
+        percent: f32,
+    },
+    /// Interactive flow batch export complete notification.
+    FlowExportFinished {
+        successful: usize,
+        total: usize,
+        output_dir: String,
+    },
+    /// Interactive flow batch export cancelled notification.
+    FlowExportCancelled {
+        processed: usize,
+        total: usize,
+        cancelled: usize,
+    },
     /// Asynchronous error notification.
     Error(String),
     /// Transient status message for the footer.

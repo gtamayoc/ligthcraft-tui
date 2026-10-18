@@ -26,6 +26,7 @@ use crate::tui::layout::{AppLayout, PaneId};
 use crate::tui::mode_a::{render_mode_a, FlagStatus, ModeAState, ModeAView};
 use crate::tui::mode_b::{render_mode_b, ModeBState};
 use crate::tui::terminal::TerminalGuard;
+use tokio_util::sync::CancellationToken;
 
 /// Dual operating modes (Requirement F-TUI-02).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +71,7 @@ pub struct AppController {
     pub export_prompt: bool,
     pub flow_state: InteractiveFlowState,
     pub event_sender: Option<tokio::sync::mpsc::Sender<AppEvent>>,
+    pub flow_cancel_token: Option<CancellationToken>,
 }
 
 impl AppController {
@@ -114,7 +116,8 @@ impl AppController {
         let cache = PreviewCache::new(PreviewCacheConfig::default());
         let mut mode_a = ModeAState::default();
 
-        if let Some(first) = items.first() {
+        if let Some(first) = items.first_mut() {
+            first.is_selected = true;
             mode_a.metadata = read_native_metadata(&first.path);
             mode_a.active_photo = Some(crate::mcp::tools::PhotoInfo {
                 id: 1,
@@ -161,7 +164,7 @@ impl AppController {
             mcp_client,
             preset_store,
             status_message:
-                "Listo. [↑/↓] Seleccionar Foto | [Tab] Ir a Variantes/Canvas | [E] Exportar".into(),
+                "Listo. [↑/↓] Moverse por fotos | [Enter] Confirmar y continuar ❯ | [Space] Selección múltiple | [E] Asistente".into(),
             terminal_size: Rect::new(0, 0, 120, 30),
             needs_render: true,
             running: true,
@@ -169,6 +172,7 @@ impl AppController {
             export_prompt: false,
             flow_state: InteractiveFlowState::default(),
             event_sender: None,
+            flow_cancel_token: None,
         })
     }
 
@@ -307,9 +311,59 @@ impl AppController {
                 self.needs_render = true;
             }
             AppEvent::Tick => {
-                if self.is_animating() {
+                if self.is_animating() || self.flow_state.step == WizardStep::Exporting {
                     self.needs_render = true;
                 }
+            }
+            AppEvent::FlowExportProgress {
+                completed,
+                total,
+                current_label,
+                percent,
+            } => {
+                if self.flow_state.is_active {
+                    self.flow_state.set_export_progress(
+                        completed,
+                        total,
+                        current_label.clone(),
+                        percent,
+                    );
+                    if !self.flow_state.is_confirming_cancel {
+                        self.status_message = format!(
+                            "Renderizado en proceso: {}/{} ({:.0}%) - {}",
+                            completed, total, percent, current_label
+                        );
+                    }
+                    self.needs_render = true;
+                }
+            }
+            AppEvent::FlowExportFinished {
+                successful,
+                total,
+                output_dir,
+            } => {
+                self.flow_cancel_token = None;
+                self.flow_state.close();
+                self.mode_a.clear_selection();
+                self.status_message = format!(
+                    "Exportación completada con éxito. Guardado OK: {}/{} archivo(s) en {}",
+                    successful, total, output_dir
+                );
+                self.needs_render = true;
+            }
+            AppEvent::FlowExportCancelled {
+                processed,
+                total,
+                cancelled,
+            } => {
+                self.flow_cancel_token = None;
+                self.flow_state.close();
+                self.mode_a.clear_selection();
+                self.status_message = format!(
+                    "Exportación cancelada por el usuario. {} de {} fotos guardadas, {} omitidas.",
+                    processed, total, cancelled
+                );
+                self.needs_render = true;
             }
             AppEvent::PreviewReady {
                 photo_id, image, ..
@@ -430,10 +484,16 @@ impl AppController {
         // Global hotkeys
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Some(ref token) = self.flow_cancel_token {
+                    token.cancel();
+                }
                 self.running = false;
                 return Ok(());
             }
             KeyCode::Char('q') | KeyCode::Char('Q') => {
+                if let Some(ref token) = self.flow_cancel_token {
+                    token.cancel();
+                }
                 self.running = false;
                 return Ok(());
             }
@@ -493,10 +553,20 @@ impl AppController {
                 if self.focused_pane == PaneId::Library =>
             {
                 if !self.items.is_empty() {
+                    let old_idx = self.selected_index;
+                    let multi_selected = self.items.iter().filter(|i| i.is_selected).count() > 1;
                     if self.selected_index > 0 {
                         self.selected_index -= 1;
                     } else {
                         self.selected_index = self.items.len() - 1;
+                    }
+                    if !multi_selected {
+                        if let Some(old) = self.items.get_mut(old_idx) {
+                            old.is_selected = false;
+                        }
+                        if let Some(cur) = self.items.get_mut(self.selected_index) {
+                            cur.is_selected = true;
+                        }
                     }
                     self.sync_selected_photo().await?;
                 }
@@ -505,13 +575,31 @@ impl AppController {
                 if self.focused_pane == PaneId::Library =>
             {
                 if !self.items.is_empty() {
+                    let old_idx = self.selected_index;
+                    let multi_selected = self.items.iter().filter(|i| i.is_selected).count() > 1;
                     if self.selected_index < self.items.len() - 1 {
                         self.selected_index += 1;
                     } else {
                         self.selected_index = 0;
                     }
+                    if !multi_selected {
+                        if let Some(old) = self.items.get_mut(old_idx) {
+                            old.is_selected = false;
+                        }
+                        if let Some(cur) = self.items.get_mut(self.selected_index) {
+                            cur.is_selected = true;
+                        }
+                    }
                     self.sync_selected_photo().await?;
                 }
+            }
+            KeyCode::Enter if self.focused_pane == PaneId::Library => {
+                if let Some(cur) = self.items.get_mut(self.selected_index) {
+                    cur.is_selected = true;
+                }
+                self.focused_pane = PaneId::PreviewCanvas;
+                self.mode_a.view_mode = ModeAView::VariantMatrix;
+                self.status_message = "Paso 1 confirmado. Ahora en Paso 2: Variantes. Pulsa [Space] para seleccionar variantes o [E] para continuar.".into();
             }
             KeyCode::Char(' ') if self.focused_pane == PaneId::Library => {
                 if let Some(item) = self.items.get_mut(self.selected_index) {
@@ -521,9 +609,9 @@ impl AppController {
                         "Foto {} {}",
                         item.filename,
                         if is_sel {
-                            "marcada para lote [x]"
+                            "seleccionada [✓]"
                         } else {
-                            "desmarcada [ ]"
+                            "deseleccionada [ ]"
                         }
                     );
                 }
@@ -1051,16 +1139,22 @@ impl AppController {
         let output_dir = PathBuf::from("export").join("interactive");
         let pipeline = crate::export::ExportPipeline::new();
 
+        let total_jobs = target_variants.len() * target_ratios.len() * target_formats.len();
+        self.flow_state.step = WizardStep::Exporting;
+        self.flow_state.set_export_progress(
+            0,
+            total_jobs,
+            format!("Iniciando renderizado de {} archivo(s)...", total_jobs),
+            0.0,
+        );
+
         self.status_message = format!(
-            "Exportando matriz: {} variante(s) × {} proporción(es) × {} formato(s) para {}...",
-            target_variants.len(),
-            target_ratios.len(),
-            target_formats.len(),
-            file_name
+            "Exportando matriz en segundo plano: {} archivo(s) para {}...",
+            total_jobs, file_name
         );
         self.needs_render = true;
 
-        let mut success_count = 0usize;
+        let mut jobs = Vec::new();
         let mut job_seq = 1usize;
 
         for &slot_idx in &target_variants {
@@ -1110,22 +1204,111 @@ impl AppController {
                         seq_number: job_seq,
                         collision_policy: crate::export::CollisionPolicy::Overwrite,
                     };
+                    jobs.push((job, format, ratio, variant_tag));
                     job_seq += 1;
+                }
+            }
+        }
+
+        // Initialize cooperative cancellation token for this batch run
+        let cancel_token = CancellationToken::new();
+        self.flow_cancel_token = Some(cancel_token.clone());
+
+        // Check if event sender is available for async streaming
+        if let Some(ref tx) = self.event_sender {
+            let tx_clone = tx.clone();
+            tokio::spawn(async move {
+                let mut success_count = 0usize;
+                let total = jobs.len();
+                for (idx, (job, format, ratio, variant_tag)) in jobs.into_iter().enumerate() {
+                    // Check cancellation before starting next job
+                    if cancel_token.is_cancelled() {
+                        let _ = tx_clone
+                            .send(AppEvent::FlowExportCancelled {
+                                processed: success_count,
+                                total,
+                                cancelled: total.saturating_sub(success_count),
+                            })
+                            .await;
+                        return;
+                    }
+
+                    let desc = format!("{} [{:?}, {}]", variant_tag, format, ratio.aspect_label());
+                    let _ = tx_clone
+                        .send(AppEvent::FlowExportProgress {
+                            completed: idx,
+                            total,
+                            current_label: desc.clone(),
+                            percent: if total > 0 {
+                                (idx as f32 / total as f32) * 100.0
+                            } else {
+                                0.0
+                            },
+                        })
+                        .await;
+
                     if let Ok(crate::export::ExportOutcome::Success { .. }) =
                         pipeline.execute_export(None, &job).await
                     {
                         success_count += 1;
                     }
+
+                    // Check cancellation immediately after current job finishes
+                    if cancel_token.is_cancelled() {
+                        let _ = tx_clone
+                            .send(AppEvent::FlowExportCancelled {
+                                processed: success_count,
+                                total,
+                                cancelled: total.saturating_sub(success_count),
+                            })
+                            .await;
+                        return;
+                    }
+
+                    let _ = tx_clone
+                        .send(AppEvent::FlowExportProgress {
+                            completed: idx + 1,
+                            total,
+                            current_label: desc,
+                            percent: if total > 0 {
+                                ((idx + 1) as f32 / total as f32) * 100.0
+                            } else {
+                                100.0
+                            },
+                        })
+                        .await;
+                }
+
+                let _ = tx_clone
+                    .send(AppEvent::FlowExportFinished {
+                        successful: success_count,
+                        total,
+                        output_dir: "export/interactive".into(),
+                    })
+                    .await;
+            });
+        } else {
+            // Synchronous execution fallback (for unit tests without event loop)
+            let mut success_count = 0usize;
+            for (job, _, _, _) in jobs {
+                if cancel_token.is_cancelled() {
+                    break;
+                }
+                if let Ok(crate::export::ExportOutcome::Success { .. }) =
+                    pipeline.execute_export(None, &job).await
+                {
+                    success_count += 1;
                 }
             }
+            self.flow_cancel_token = None;
+            self.flow_state.close();
+            self.mode_a.clear_selection();
+            self.status_message = format!(
+                "Exportación completada. Guardado OK: {} archivo(s) generados en export/interactive/",
+                success_count
+            );
         }
 
-        self.flow_state.close();
-        self.mode_a.clear_selection();
-        self.status_message = format!(
-            "Exportación completada. Guardado OK: {} archivo(s) generados en export/interactive/",
-            success_count
-        );
         self.needs_render = true;
         Ok(())
     }
@@ -1133,6 +1316,11 @@ impl AppController {
     /// Process keyboard inputs when the top interactive wizard flow is active.
     pub async fn handle_flow_key(&mut self, key: KeyEvent) -> Result<(), AppError> {
         match self.flow_state.step {
+            WizardStep::Photos => {
+                if key.code == KeyCode::Char('e') || key.code == KeyCode::Char('E') {
+                    self.flow_state.step = WizardStep::AspectRatios;
+                }
+            }
             WizardStep::Variants => match key.code {
                 KeyCode::Esc => {
                     self.flow_state.close();
@@ -1150,6 +1338,18 @@ impl AppController {
                 _ => {}
             },
             WizardStep::AspectRatios => match key.code {
+                // Arrow navigation
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.flow_state.prev_ratio();
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    self.flow_state.next_ratio();
+                }
+                // Toggle focused ratio with Space
+                KeyCode::Char(' ') => {
+                    self.flow_state.toggle_focused_ratio();
+                }
+                // Direct numeric hotkeys
                 KeyCode::Char('1') => self.flow_state.toggle_ratio(AspectRatio::Square1x1),
                 KeyCode::Char('2') => self.flow_state.toggle_ratio(AspectRatio::Photo3x2),
                 KeyCode::Char('3') => self.flow_state.toggle_ratio(AspectRatio::Classic4x3),
@@ -1157,9 +1357,17 @@ impl AppController {
                 KeyCode::Char('5') => self.flow_state.toggle_ratio(AspectRatio::Social4x5),
                 KeyCode::Char('6') => self.flow_state.toggle_ratio(AspectRatio::Original),
                 KeyCode::Char('a') | KeyCode::Char('A') => {
-                    self.flow_state.selected_ratios = AspectRatio::ALL.to_vec();
+                    if self.flow_state.selected_ratios.len() == AspectRatio::ALL.len() {
+                        self.flow_state.selected_ratios = vec![AspectRatio::Original];
+                    } else {
+                        self.flow_state.selected_ratios = AspectRatio::ALL.to_vec();
+                    }
                 }
+                // Enter confirms and continues
                 KeyCode::Enter => {
+                    if self.flow_state.selected_ratios.is_empty() {
+                        self.flow_state.toggle_focused_ratio();
+                    }
                     if !self.flow_state.selected_ratios.is_empty() {
                         self.flow_state.step = WizardStep::FileFormats;
                     } else {
@@ -1167,13 +1375,26 @@ impl AppController {
                             "Selecciona al menos una proporción antes de continuar".into();
                     }
                 }
-                KeyCode::Char('b') | KeyCode::Char('B') | KeyCode::Esc => {
+                // Backward navigation
+                KeyCode::Char('b') | KeyCode::Char('B') | KeyCode::Esc | KeyCode::Backspace => {
                     self.flow_state.close();
                     self.status_message = "Regresado al panel de variantes (Paso 2)".into();
                 }
                 _ => {}
             },
             WizardStep::FileFormats => match key.code {
+                // Arrow navigation
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.flow_state.prev_format();
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    self.flow_state.next_format();
+                }
+                // Toggle focused format with Space
+                KeyCode::Char(' ') => {
+                    self.flow_state.toggle_focused_format();
+                }
+                // Direct numeric hotkeys
                 KeyCode::Char('1') => {
                     self.flow_state.selected_formats = vec![crate::export::OutputFormat::Tiff];
                 }
@@ -1196,12 +1417,17 @@ impl AppController {
                         crate::export::OutputFormat::Png,
                     ];
                 }
+                // Enter confirms and continues
                 KeyCode::Enter => {
+                    if self.flow_state.selected_formats.is_empty() {
+                        self.flow_state.toggle_focused_format();
+                    }
                     if !self.flow_state.selected_formats.is_empty() {
                         self.flow_state.step = WizardStep::Summary;
                     }
                 }
-                KeyCode::Char('b') | KeyCode::Char('B') => {
+                // Backward navigation
+                KeyCode::Char('b') | KeyCode::Char('B') | KeyCode::Backspace => {
                     self.flow_state.step = WizardStep::AspectRatios;
                 }
                 KeyCode::Esc => {
@@ -1211,7 +1437,41 @@ impl AppController {
                 _ => {}
             },
             WizardStep::Summary => match key.code {
-                KeyCode::Char('1') | KeyCode::Enter => {
+                // Arrow navigation
+                KeyCode::Left | KeyCode::Char('h') => {
+                    self.flow_state.prev_summary();
+                }
+                KeyCode::Right | KeyCode::Char('l') => {
+                    self.flow_state.next_summary();
+                }
+                // Enter executes the focused summary action
+                KeyCode::Enter => match self.flow_state.focused_summary_idx {
+                    0 => {
+                        self.execute_flow_export_batch().await?;
+                    }
+                    1 => {
+                        self.flow_state.close();
+                        self.status_message =
+                                "Modificando variantes en Panel 2. Pulsa [E] para reanudar el asistente."
+                                    .into();
+                    }
+                    2 => {
+                        self.flow_state.step = WizardStep::AspectRatios;
+                    }
+                    3 => {
+                        self.flow_state.step = WizardStep::FileFormats;
+                    }
+                    4 => {
+                        self.flow_state.step = WizardStep::SavePreset;
+                    }
+                    5 => {
+                        self.flow_state.close();
+                        self.status_message = "Exportación cancelada.".into();
+                    }
+                    _ => {}
+                },
+                // Direct hotkeys
+                KeyCode::Char('1') => {
                     self.execute_flow_export_batch().await?;
                 }
                 KeyCode::Char('2') => {
@@ -1235,6 +1495,31 @@ impl AppController {
                 }
                 _ => {}
             },
+            WizardStep::Exporting => {
+                if self.flow_state.is_confirming_cancel {
+                    match key.code {
+                        KeyCode::Char('s') | KeyCode::Char('S') | KeyCode::Enter => {
+                            if let Some(ref token) = self.flow_cancel_token {
+                                token.cancel();
+                            }
+                            self.flow_state.is_confirming_cancel = false;
+                            self.status_message =
+                                "Deteniendo exportación... finalizando archivo en curso.".into();
+                        }
+                        KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                            self.flow_state.is_confirming_cancel = false;
+                            self.status_message =
+                                "Cancelación descartada. Exportación en curso.".into();
+                        }
+                        _ => {}
+                    }
+                } else if key.code == KeyCode::Esc {
+                    self.flow_state.is_confirming_cancel = true;
+                    self.status_message =
+                        "¿Desea cancelar la exportación en curso? [S]í / [N]o (o [Esc] para continuar)"
+                            .into();
+                }
+            }
             WizardStep::SavePreset => match key.code {
                 KeyCode::Enter | KeyCode::Char('b') | KeyCode::Char('B') | KeyCode::Esc => {
                     self.flow_state.step = WizardStep::Summary;
@@ -1310,50 +1595,163 @@ impl AppController {
             return;
         }
 
-        let mode_tag = match self.mode {
-            AppMode::SinglePhoto => Span::styled(
-                " [F10] Mode A: Single Photo ",
+        // Permanent Assistant guidance during standard browsing
+        let active_step = if self.focused_pane == PaneId::Library {
+            WizardStep::Photos
+        } else {
+            WizardStep::Variants
+        };
+
+        let step1_style = if active_step == WizardStep::Photos {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Cyan)
+        };
+        let step2_style = if active_step == WizardStep::Variants {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Yellow)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Yellow)
+        };
+
+        let mode_label = match self.mode {
+            AppMode::SinglePhoto => "Mode A",
+            AppMode::BatchQueue => "Mode B",
+        };
+
+        let breadcrumb_line = Line::from(vec![
+            Span::styled(
+                " LightCraft TUI ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" [{}] ", mode_label),
                 Style::default()
                     .fg(Color::Black)
                     .bg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ),
-            AppMode::BatchQueue => Span::styled(
-                " [F10] Mode B: Batch Queue ",
+            Span::raw(" | "),
+            Span::styled(
+                " [ASISTENTE] ",
                 Style::default()
                     .fg(Color::Black)
-                    .bg(Color::Magenta)
+                    .bg(Color::White)
                     .add_modifier(Modifier::BOLD),
             ),
+            Span::raw(" "),
+            Span::styled(" [1. Fotos] ", step1_style),
+            Span::raw(" ❯ "),
+            Span::styled(" [2. Variantes] ", step2_style),
+            Span::styled(
+                " ❯ [3. Proporciones] ❯ [4. Formatos] ❯ [5. Resumen] ❯ [6. Renderizado] ",
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(" [MCP: OK] ", Style::default().fg(Color::Green)),
+        ]);
+
+        let (guide_line, help_line) = if active_step == WizardStep::Photos {
+            let photo_name = self
+                .items
+                .get(self.selected_index)
+                .map(|i| i.filename.as_str())
+                .unwrap_or("Sin fotos");
+            let sel_count = self.items.iter().filter(|i| i.is_selected).count();
+            (
+                Line::from(vec![
+                    Span::styled(
+                        " Foto activa: ",
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(" {} ", photo_name),
+                        Style::default()
+                            .fg(Color::LightCyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(
+                            "[✓ {} seleccionada(s)] ({}x{}, ISO {}, {}) ",
+                            sel_count,
+                            self.mode_a.metadata.width,
+                            self.mode_a.metadata.height,
+                            self.mode_a.metadata.iso.map(|v| v.to_string()).unwrap_or_else(|| "N/A".into()),
+                            self.mode_a.metadata.camera_model.as_deref().unwrap_or("General")
+                        ),
+                        Style::default().fg(Color::Gray),
+                    ),
+                ]),
+                Line::from(vec![Span::styled(
+                    " [↑/↓] Moverse por fotos | [Enter] Confirmar y continuar a Variantes ❯ | [Space] Selección múltiple | [E] Asistente ",
+                    Style::default().fg(Color::Yellow),
+                )]),
+            )
+        } else {
+            let sel_var = self
+                .mode_a
+                .variants
+                .iter()
+                .take(self.mode_a.variant_count)
+                .filter(|v| v.is_selected)
+                .count();
+            (
+                Line::from(vec![
+                    Span::styled(
+                        " Matriz de Variantes: ",
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(" {} variante(s) seleccionadas ", sel_var),
+                        Style::default()
+                            .fg(Color::LightCyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        format!(" | Receta activa: {} ", self.mode_a.active_recipe.name),
+                        Style::default().fg(Color::Gray),
+                    ),
+                ]),
+                Line::from(vec![Span::styled(
+                    " [←/→/↑/↓] Moverse | [Space] Alternar selección | [Enter] Promover | [E] Siguiente paso: Proporciones | [Tab] Fotos ",
+                    Style::default().fg(Color::Yellow),
+                )]),
+            )
         };
 
-        let title = Span::styled(
-            " LightCraft TUI v0.1.0 ",
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        );
-        let mcp_badge = Span::styled(" [MCP: Connected] ", Style::default().fg(Color::Green));
-
-        let line = Line::from(vec![
-            title,
-            Span::raw(" | "),
-            mode_tag,
-            Span::raw(" | "),
-            mcp_badge,
-        ]);
-        let p = Paragraph::new(line);
-        frame.render_widget(p, area);
+        if area.height <= 1 {
+            let p = Paragraph::new(breadcrumb_line);
+            frame.render_widget(p, area);
+        } else if area.height <= 3 {
+            let p = Paragraph::new(vec![breadcrumb_line, help_line]);
+            frame.render_widget(p, area);
+        } else {
+            let block = Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::DarkGray))
+                .title(format!(" ❯ ASISTENTE DE FLUJO: {} ❮ ", active_step.title()));
+            let p = Paragraph::new(vec![breadcrumb_line, guide_line, help_line])
+                .block(block)
+                .wrap(Wrap { trim: false });
+            frame.render_widget(p, area);
+        }
     }
 
     fn render_top_wizard_banner(&self, frame: &mut Frame, area: Rect) {
-        let step_title = match self.flow_state.step {
-            WizardStep::Variants => "Paso 2/5: Variantes de Procesamiento",
-            WizardStep::AspectRatios => "Paso 3/5: Proporciones de Imagen (Aspect Ratio)",
-            WizardStep::FileFormats => "Paso 4/5: Formatos de Archivo de Salida",
-            WizardStep::Summary => "Paso 5/5: Resumen y Confirmación de Exportación",
-            WizardStep::SavePreset => "Guardar Configuración como Preset",
-        };
+        let step_title = self.flow_state.step.title();
+
+        let step1_style = Style::default().fg(Color::Cyan);
+        let step2_style = Style::default().fg(Color::Yellow);
 
         let step3_style = if self.flow_state.step == WizardStep::AspectRatios {
             Style::default()
@@ -1381,6 +1779,14 @@ impl AppController {
         } else {
             Style::default().fg(Color::Green)
         };
+        let step6_style = if self.flow_state.step == WizardStep::Exporting {
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::LightCyan)
+        };
 
         let breadcrumb_line = Line::from(vec![
             Span::styled(
@@ -1390,16 +1796,21 @@ impl AppController {
                     .bg(Color::White)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw(" [1. Fotos] ❯ [2. Variantes] ❯ "),
+            Span::styled(" [1. Fotos] ", step1_style),
+            Span::raw("❯"),
+            Span::styled(" [2. Variantes] ", step2_style),
+            Span::raw("❯"),
             Span::styled(" [3. Proporciones] ", step3_style),
-            Span::raw(" ❯ "),
+            Span::raw("❯"),
             Span::styled(" [4. Formatos] ", step4_style),
-            Span::raw(" ❯ "),
+            Span::raw("❯"),
             Span::styled(" [5. Resumen] ", step5_style),
+            Span::raw("❯"),
+            Span::styled(" [6. Renderizado] ", step6_style),
         ]);
 
         let (info_line, help_line) = match self.flow_state.step {
-            WizardStep::Variants => (
+            WizardStep::Photos | WizardStep::Variants => (
                 Line::from(vec![Span::styled(
                     format!(
                         " Variantes seleccionadas: {} ",
@@ -1413,67 +1824,138 @@ impl AppController {
                 )]),
             ),
             WizardStep::AspectRatios => {
-                let ratios_str = self
-                    .flow_state
-                    .selected_ratios
-                    .iter()
-                    .map(|r| r.aspect_label())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let ratio_items: [(AspectRatio, &str, &str); 6] = [
+                    (AspectRatio::Square1x1, "1", "1:1 Cuadrado"),
+                    (AspectRatio::Photo3x2, "2", "3:2 Foto"),
+                    (AspectRatio::Classic4x3, "3", "4:3 Clásico"),
+                    (AspectRatio::Widescreen16x9, "4", "16:9 Panorámico"),
+                    (AspectRatio::Social4x5, "5", "4:5 Retrato"),
+                    (AspectRatio::Original, "6", "Original"),
+                ];
+
+                let mut spans = Vec::new();
+                for (idx, (ratio, key_num, label)) in ratio_items.iter().enumerate() {
+                    let is_sel = self.flow_state.selected_ratios.contains(ratio);
+                    let is_foc = idx == self.flow_state.focused_ratio_idx;
+
+                    let prefix = if is_foc { "► " } else { "  " };
+                    let suffix = if is_foc { " ◄" } else { "  " };
+                    let mark = if is_sel { "[✓]" } else { "[ ]" };
+                    let item_text = format!("{}{}[{}] {}{}", prefix, mark, key_num, label, suffix);
+
+                    let style = if is_sel {
+                        // Azul claro al estar seleccionado
+                        let mut st = Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD);
+                        if is_foc {
+                            st = st.bg(Color::Rgb(20, 50, 80));
+                        }
+                        st
+                    } else {
+                        // Blanco sin selección
+                        let mut st = Style::default().fg(Color::White);
+                        if is_foc {
+                            st = st.bg(Color::Rgb(50, 50, 50)).add_modifier(Modifier::BOLD);
+                        }
+                        st
+                    };
+
+                    spans.push(Span::styled(item_text, style));
+                    spans.push(Span::raw(" "));
+                }
+
+                // Opción 7: Todas
+                let all_sel = self.flow_state.selected_ratios.len() == AspectRatio::ALL.len();
+                let all_foc = self.flow_state.focused_ratio_idx == 6;
+                let all_prefix = if all_foc { "► " } else { "  " };
+                let all_suffix = if all_foc { " ◄" } else { "  " };
+                let all_mark = if all_sel { "[✓]" } else { "[ ]" };
+                let all_text = format!("{}{}[A] Todas{}", all_prefix, all_mark, all_suffix);
+                let all_style = if all_sel {
+                    let mut st = Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD);
+                    if all_foc {
+                        st = st.bg(Color::Rgb(20, 50, 80));
+                    }
+                    st
+                } else {
+                    let mut st = Style::default().fg(Color::White);
+                    if all_foc {
+                        st = st.bg(Color::Rgb(50, 50, 50)).add_modifier(Modifier::BOLD);
+                    }
+                    st
+                };
+                spans.push(Span::styled(all_text, all_style));
+
                 (
-                    Line::from(vec![
-                        Span::styled(
-                            " Proporciones: ",
-                            Style::default()
-                                .fg(Color::White)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(
-                            " [1] 1:1  [2] 3:2  [3] 4:3  [4] 16:9  [5] 4:5  [6] Original  [A] Todos ",
-                            Style::default().fg(Color::Cyan),
-                        ),
-                        Span::styled(
-                            format!(" | Activas: [{}] ", ratios_str),
-                            Style::default()
-                                .fg(Color::Green)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]),
+                    Line::from(spans),
                     Line::from(vec![Span::styled(
-                        " [1..6/A] Alternar selección | [Enter] Continuar a Formatos | [B] Volver a Variantes | [Esc] Cancelar ",
+                        " [←/→] Moverse | [Espacio] Seleccionar/Desmarcar [✓] | [Enter] Continuar a Formatos ❯ | [1..6/A] Atajo | [B] Volver | [Esc] Cancelar ",
                         Style::default().fg(Color::Yellow),
                     )]),
                 )
             }
             WizardStep::FileFormats => {
-                let fmt_str = self
-                    .flow_state
-                    .selected_formats
-                    .iter()
-                    .map(|f| f.default_extension().to_uppercase())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let format_items = [
+                    (
+                        "1",
+                        "Solo TIFF (16-bit)",
+                        self.flow_state.selected_formats == vec![crate::export::OutputFormat::Tiff],
+                    ),
+                    (
+                        "2",
+                        "Solo JPEG (Web)",
+                        self.flow_state.selected_formats == vec![crate::export::OutputFormat::Jpeg],
+                    ),
+                    (
+                        "3",
+                        "Solo PNG",
+                        self.flow_state.selected_formats == vec![crate::export::OutputFormat::Png],
+                    ),
+                    (
+                        "4",
+                        "TIFF + JPEG",
+                        self.flow_state.selected_formats.contains(&crate::export::OutputFormat::Tiff)
+                            && self.flow_state.selected_formats.contains(&crate::export::OutputFormat::Jpeg)
+                            && self.flow_state.selected_formats.len() == 2,
+                    ),
+                    (
+                        "5",
+                        "Todos (TIFF+JPEG+PNG)",
+                        self.flow_state.selected_formats.len() == 3,
+                    ),
+                ];
+
+                let mut spans = Vec::new();
+                for (idx, (key_num, label, is_sel)) in format_items.iter().enumerate() {
+                    let is_foc = idx == self.flow_state.focused_format_idx;
+                    let prefix = if is_foc { "► " } else { "  " };
+                    let suffix = if is_foc { " ◄" } else { "  " };
+                    let mark = if *is_sel { "[✓]" } else { "[ ]" };
+                    let item_text = format!("{}{}[{}] {}{}", prefix, mark, key_num, label, suffix);
+
+                    let style = if *is_sel {
+                        // Azul claro al estar seleccionado
+                        let mut st = Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD);
+                        if is_foc {
+                            st = st.bg(Color::Rgb(20, 50, 80));
+                        }
+                        st
+                    } else {
+                        // Blanco sin selección
+                        let mut st = Style::default().fg(Color::White);
+                        if is_foc {
+                            st = st.bg(Color::Rgb(50, 50, 50)).add_modifier(Modifier::BOLD);
+                        }
+                        st
+                    };
+
+                    spans.push(Span::styled(item_text, style));
+                    spans.push(Span::raw(" "));
+                }
+
                 (
-                    Line::from(vec![
-                        Span::styled(
-                            " Formatos de salida: ",
-                            Style::default()
-                                .fg(Color::White)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::styled(
-                            " [1] Solo TIFF (16b)  [2] Solo JPEG  [3] Solo PNG  [4] TIFF+JPEG  [5] Todos ",
-                            Style::default().fg(Color::Cyan),
-                        ),
-                        Span::styled(
-                            format!(" | Activos: [{}] ", fmt_str),
-                            Style::default()
-                                .fg(Color::Green)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                    ]),
+                    Line::from(spans),
                     Line::from(vec![Span::styled(
-                        " [1..5] Elegir formatos | [Enter] Continuar al Resumen | [B] Volver a Proporciones | [Esc] Cancelar ",
+                        " [←/→] Moverse | [Espacio] Seleccionar formato [✓] | [Enter] Continuar al Resumen ❯ | [1..5] Atajo | [B] Proporciones | [Esc] Salir ",
                         Style::default().fg(Color::Yellow),
                     )]),
                 )
@@ -1484,6 +1966,38 @@ impl AppController {
                 let ratios = self.flow_state.selected_ratios.len().max(1);
                 let formats = self.flow_state.selected_formats.len().max(1);
                 let plan = JobPlan::new(photos, variants, ratios, formats);
+
+                let summary_actions = [
+                    (0, "[1/Enter] INICIAR EXPORTACIÓN"),
+                    (1, "[2] Variantes"),
+                    (2, "[3] Proporciones"),
+                    (3, "[4] Formatos"),
+                    (4, "[P] Guardar Preset"),
+                    (5, "[Esc] Cancelar"),
+                ];
+
+                let mut action_spans = Vec::new();
+                for (idx, label) in summary_actions {
+                    let is_foc = idx == self.flow_state.focused_summary_idx;
+                    let prefix = if is_foc { "► " } else { " " };
+                    let suffix = if is_foc { " ◄" } else { " " };
+                    let text = format!("{}{}{}", prefix, label, suffix);
+
+                    let style = if idx == 0 {
+                        if is_foc {
+                            Style::default().fg(Color::Black).bg(Color::Green).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
+                        }
+                    } else if is_foc {
+                        Style::default().fg(Color::Black).bg(Color::Yellow).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(Color::White)
+                    };
+                    action_spans.push(Span::styled(text, style));
+                    action_spans.push(Span::raw("  "));
+                }
+
                 (
                     Line::from(vec![
                         Span::styled(
@@ -1496,17 +2010,107 @@ impl AppController {
                                 .add_modifier(Modifier::BOLD),
                         ),
                         Span::styled(
-                            " | Destino: export/interactive/ ",
+                            "| Carpeta: export/interactive/ ",
                             Style::default().fg(Color::White),
                         ),
                     ]),
-                    Line::from(vec![Span::styled(
-                        " [1/Enter] INICIAR EXPORTACIÓN | [2] Modificar Variantes | [3] Modificar Proporciones | [4] Modificar Formatos | [P] Guardar Preset | [Esc] Cancelar ",
-                        Style::default()
-                            .fg(Color::Yellow)
-                            .add_modifier(Modifier::BOLD),
-                    )]),
+                    Line::from(action_spans),
                 )
+            }
+            WizardStep::Exporting => {
+                if self.flow_state.is_confirming_cancel {
+                    (
+                        Line::from(vec![
+                            Span::styled(
+                                " [?] ¿CANCELAR EXPORTACIÓN EN CURSO? ",
+                                Style::default()
+                                    .fg(Color::White)
+                                    .bg(Color::Red)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!(
+                                    " Archivos completados: {}/{} ({:.0}%) ",
+                                    self.flow_state.export_completed,
+                                    self.flow_state.export_total,
+                                    self.flow_state.export_percent
+                                ),
+                                Style::default()
+                                    .fg(Color::Yellow)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ]),
+                        Line::from(vec![
+                            Span::styled(
+                                " [S/Enter] Sí, detener exportación | [N/Esc] No, continuar exportando ",
+                                Style::default()
+                                    .fg(Color::LightYellow)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ]),
+                    )
+                } else {
+                    let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                    let spinner = spinner_frames[(self.flow_state.export_completed * 2) % spinner_frames.len()];
+                    let pct = self.flow_state.export_percent.clamp(0.0, 100.0);
+                    let filled = ((pct / 100.0) * 20.0).round() as usize;
+                    let empty = 20usize.saturating_sub(filled);
+                    let bar = format!("[{}{}] {:.1}%", "█".repeat(filled), "░".repeat(empty), pct);
+
+                    let elapsed = self
+                        .flow_state
+                        .export_start_time
+                        .map(|t| t.elapsed().as_secs_f32())
+                        .unwrap_or(0.0);
+
+                    let eta_str = if self.flow_state.export_completed > 0
+                        && self.flow_state.export_total > self.flow_state.export_completed
+                    {
+                        let rate = elapsed / self.flow_state.export_completed as f32;
+                        let remaining = self.flow_state.export_total - self.flow_state.export_completed;
+                        format!("~{:.1}s restantes", rate * remaining as f32)
+                    } else if self.flow_state.export_completed >= self.flow_state.export_total && self.flow_state.export_total > 0 {
+                        "¡Completado!".into()
+                    } else {
+                        "calculando...".into()
+                    };
+
+                    (
+                        Line::from(vec![
+                            Span::styled(
+                                format!(" {} PROCESANDO LOTE: ", spinner),
+                                Style::default()
+                                    .fg(Color::Yellow)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!(" {} ", bar),
+                                Style::default()
+                                    .fg(Color::LightCyan)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::styled(
+                                format!(
+                                    " Archivo {} de {} ",
+                                    self.flow_state.export_completed, self.flow_state.export_total
+                                ),
+                                Style::default()
+                                    .fg(Color::White)
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                        ]),
+                        Line::from(vec![
+                            Span::styled(
+                                format!(" Tarea: {} ", self.flow_state.export_current_label),
+                                Style::default().fg(Color::Cyan),
+                            ),
+                            Span::styled(
+                                format!("| Transcurrido: {:.1}s | ETA: {} | [Esc] Interrumpir ", elapsed, eta_str),
+                                Style::default().fg(Color::Yellow),
+                            ),
+                        ]),
+                    )
+                }
             }
             WizardStep::SavePreset => (
                 Line::from(vec![Span::styled(
@@ -1522,11 +2126,17 @@ impl AppController {
             ),
         };
 
+        let border_color = if self.flow_state.step == WizardStep::Exporting {
+            Color::Yellow
+        } else {
+            Color::Cyan
+        };
+
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(border_color)
                     .add_modifier(Modifier::BOLD),
             )
             .title(format!(" ❯ {} ❮ ", step_title));
@@ -1565,9 +2175,11 @@ impl AppController {
                 self.items.len()
             })
             .map(|(idx, item)| {
-                let is_selected = idx == self.selected_index;
-                let prefix = if is_selected { "► " } else { "  " };
-                let flag = if item.is_selected { "[x] " } else { "[ ] " };
+                let is_focused = idx == self.selected_index;
+                let is_sel = item.is_selected;
+                let prefix = if is_focused { "► " } else { "  " };
+                let suffix = if is_focused { " ◄" } else { "  " };
+                let flag = if is_sel { "[✓] " } else { "[ ] " };
                 let raw_badge = if item.is_cr3 { " [CR3]" } else { " [IMG]" };
                 let star_badge = if item.rating > 0 {
                     format!(" {}★", item.rating)
@@ -1582,20 +2194,26 @@ impl AppController {
                     ""
                 };
 
-                let style = if is_selected && is_pane_focused {
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD)
-                } else if is_selected {
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD)
+                let style = if is_sel {
+                    // Azul claro al estar seleccionado
+                    let mut st = Style::default()
+                        .fg(Color::LightCyan)
+                        .add_modifier(Modifier::BOLD);
+                    if is_focused && is_pane_focused {
+                        st = st.bg(Color::Rgb(20, 50, 80));
+                    }
+                    st
                 } else {
-                    Style::default().fg(Color::White)
+                    // Blanco sin selección
+                    let mut st = Style::default().fg(Color::White);
+                    if is_focused && is_pane_focused {
+                        st = st.bg(Color::Rgb(50, 50, 50)).add_modifier(Modifier::BOLD);
+                    }
+                    st
                 };
                 ListItem::new(format!(
-                    "{}{}{}{}{}{}",
-                    prefix, flag, item.filename, raw_badge, star_badge, pick_badge
+                    "{}{}{}{}{}{}{}",
+                    prefix, flag, item.filename, raw_badge, star_badge, pick_badge, suffix
                 ))
                 .style(style)
             })
