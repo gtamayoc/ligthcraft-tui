@@ -197,20 +197,32 @@ impl ModeBState {
 }
 
 /// Render Mode B batch queue table, progress gauges, and controls.
-pub fn render_mode_b(frame: &mut Frame, area: Rect, state: &ModeBState, is_focused: bool) {
+pub fn render_mode_b(
+    frame: &mut Frame,
+    area: Rect,
+    state: &ModeBState,
+    is_focused: bool,
+    glyphs: &crate::tui::glyphs::GlyphSet,
+) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(if is_focused {
-            BorderType::Thick
+            BorderType::Double
         } else {
             BorderType::Rounded
         })
         .border_style(if is_focused {
-            Style::default().fg(Color::Magenta)
+            Style::default()
+                .fg(Color::Magenta)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         })
-        .title(" ❯ Mode B: Batch Queue Controller (M4 Async Scaffold) ");
+        .title(format!(
+            " {} [2] Cola de Procesamiento por Lotes {} ",
+            glyphs.step_arrow(),
+            glyphs.step_left(),
+        ));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -234,7 +246,7 @@ pub fn render_mode_b(frame: &mut Frame, area: Rect, state: &ModeBState, is_focus
 
     let gauge = Gauge::default()
         .block(Block::default().title(format!(
-            " Overall Batch Progress: {}/{} jobs ({:.1} img/s) ",
+            " Progreso Global: {}/{} trabajos ({:.1} img/s) ",
             state.completed_count, state.total_jobs, state.throughput_imgs_per_sec
         )))
         .gauge_style(Style::default().fg(Color::Green).bg(Color::DarkGray))
@@ -244,14 +256,14 @@ pub fn render_mode_b(frame: &mut Frame, area: Rect, state: &ModeBState, is_focus
 
     // 2. Active Job Status Card
     let active_desc = if state.is_paused {
-        "BATCH QUEUE PAUSED. Press [Space] to resume."
+        "COLA EN PAUSA. Pulse [Espacio] para reanudar."
     } else if let Some(active) = state
         .queue
         .iter()
         .find(|j| matches!(j.status, BatchJobStatus::Processing { .. }))
     {
         &format!(
-            "PROCESSING: {} -> {} ({})",
+            "PROCESANDO: {} -> {} ({})",
             active
                 .source_path
                 .file_name()
@@ -261,10 +273,10 @@ pub fn render_mode_b(frame: &mut Frame, area: Rect, state: &ModeBState, is_focus
             active.export_profile
         )
     } else {
-        "IDLE: All queued batch jobs processed."
+        "INACTIVO: Todos los trabajos han sido completados."
     };
 
-    let active_card = Paragraph::new(format!("  ► {}", active_desc))
+    let active_card = Paragraph::new(format!("  {} {}", glyphs.triangle_right(), active_desc))
         .style(
             Style::default()
                 .fg(Color::Yellow)
@@ -276,11 +288,11 @@ pub fn render_mode_b(frame: &mut Frame, area: Rect, state: &ModeBState, is_focus
     // 3. Queue Table
     let header_cells = [
         "#",
-        "Source File",
-        "Recipe Variant",
-        "Export Profile",
-        "Status",
-        "Elapsed",
+        "Archivo Origen",
+        "Variante",
+        "Perfil Exportación",
+        "Estado",
+        "Tiempo",
     ]
     .iter()
     .map(|h| {
@@ -299,32 +311,45 @@ pub fn render_mode_b(frame: &mut Frame, area: Rect, state: &ModeBState, is_focus
         .map(|(idx, job)| {
             let is_selected = idx == state.selected_table_row;
             let (status_str, status_style) = match &job.status {
-                BatchJobStatus::Queued => {
-                    ("Queued".to_string(), Style::default().fg(Color::DarkGray))
-                }
+                BatchJobStatus::Queued => (
+                    format!("{} En cola", glyphs.pending()),
+                    Style::default().fg(Color::DarkGray),
+                ),
                 BatchJobStatus::Processing { progress_pct } => (
-                    format!("Running ({}%)", progress_pct),
+                    format!(
+                        "{} Ejecutando ({}%)",
+                        glyphs.progress_spinner(),
+                        progress_pct
+                    ),
                     Style::default().fg(Color::Yellow),
                 ),
                 BatchJobStatus::Done { elapsed, .. } => (
-                    format!("Done ({:.2}s)", elapsed.as_secs_f32()),
+                    format!(
+                        "{} Listo ({:.2}s)",
+                        glyphs.ready_mark(),
+                        elapsed.as_secs_f32()
+                    ),
                     Style::default().fg(Color::Green),
                 ),
                 BatchJobStatus::Failed { error_message } => (
-                    format!("Failed: {}", error_message),
+                    format!("{} Error: {}", glyphs.error_mark(), error_message),
                     Style::default().fg(Color::Red),
                 ),
                 BatchJobStatus::Cancelled => (
-                    "Cancelled".to_string(),
+                    "Cancelado".to_string(),
                     Style::default().fg(Color::DarkGray),
                 ),
                 BatchJobStatus::Skipped { reason } => (
-                    format!("Skipped: {}", reason),
+                    format!("Omitido: {}", reason),
                     Style::default().fg(Color::Blue),
                 ),
             };
 
-            let prefix = if is_selected { "► " } else { "  " };
+            let prefix = if is_selected {
+                format!("{} ", glyphs.triangle_right())
+            } else {
+                "  ".to_string()
+            };
             let cells = vec![
                 Cell::from(format!("{}{}", prefix, job.id)),
                 Cell::from(
@@ -361,14 +386,20 @@ pub fn render_mode_b(frame: &mut Frame, area: Rect, state: &ModeBState, is_focus
         Constraint::Length(8),
     ];
 
-    let table = Table::new(rows, widths)
-        .header(header)
-        .block(Block::default().borders(Borders::ALL).title(" Batch Jobs "));
+    let table = Table::new(rows, widths).header(header).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Trabajos por Lote "),
+    );
 
     frame.render_widget(table, chunks[2]);
 
     // 4. Action bar footer
-    let footer_text = " [Space] Pause/Resume | [C] Cancel Queue | [R] Retry Failed | [▲/▼] Scroll | [Tab] Mode A ";
+    let footer_text = format!(
+        " [Espacio] Pausar/Reanudar | [C] Cancelar Cola | [R] Reintentar | [{}/{}] Desplazar | [Tab] Modo A | [F1] Ayuda ",
+        glyphs.arrow_up(),
+        glyphs.arrow_down(),
+    );
     let footer = Paragraph::new(footer_text)
         .alignment(Alignment::Center)
         .style(Style::default().fg(Color::Black).bg(Color::DarkGray));

@@ -35,6 +35,10 @@ pub struct Cli {
     #[arg(long)]
     pub tui: bool,
 
+    /// Force ASCII glyphs instead of Unicode icons/symbols (env: LC_ASCII=1)
+    #[arg(long, env = "LC_ASCII")]
+    pub ascii: bool,
+
     /// Override graphics protocol (auto, kitty, sixel, halfblocks)
     #[arg(long, default_value = "auto")]
     pub graphics: String,
@@ -465,7 +469,7 @@ async fn main() -> ExitCode {
                         total_files_generated += 1;
                         total_bytes_saved += bytes_written;
                         println!(
-                            "  ✓ Guardado inmediato: {:<30} | TIFF 16-bit | {:.1} MB | {:?}",
+                            "  [OK] Guardado inmediato: {:<30} | TIFF 16-bit | {:.1} MB | {:?}",
                             output_path
                                 .file_name()
                                 .unwrap_or_default()
@@ -514,7 +518,7 @@ async fn main() -> ExitCode {
                         total_files_generated += 1;
                         total_bytes_saved += bytes_written;
                         println!(
-                            "  ✓ Guardado inmediato: {:<30} | JPEG 100%  | {:.1} MB | {:?}",
+                            "  [OK] Guardado inmediato: {:<30} | JPEG 100%  | {:.1} MB | {:?}",
                             output_path
                                 .file_name()
                                 .unwrap_or_default()
@@ -604,6 +608,9 @@ async fn main() -> ExitCode {
 
         match AppController::new(mcp_client, store, draw_dir, graphics_override).await {
             Ok(mut app) => {
+                if cli.ascii {
+                    app.glyph_set = tui::GlyphSet::Ascii;
+                }
                 if let Err(e) = app.run(terminal).await {
                     eprintln!("TUI Application Error: {}", e);
                     return ExitCode::FAILURE;

@@ -367,3 +367,54 @@ async fn test_panel1_startup_navigation_without_space_and_enter_confirm() {
     assert_eq!(app.mode_a.view_mode, ModeAView::VariantMatrix);
     assert!(app.status_message.contains("Paso 1 confirmado"));
 }
+
+#[tokio::test]
+async fn test_panel1_up_down_strictly_dedicated_and_prevents_preview_canvas_hijacking() {
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(app.focused_pane, PaneId::Library);
+    assert_eq!(app.selected_index, 0);
+
+    // 1. If mouse clicked in PreviewCanvas, focus shifts to PreviewCanvas
+    app.handle_event(lightcraft_tui::tui::event::AppEvent::Mouse(MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: 60, // in PreviewCanvas area (col > 28)
+        row: 10,
+        modifiers: crossterm::event::KeyModifiers::empty(),
+    }))
+    .await
+    .unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+
+    // 2. Pressing Up or Down immediately refocuses Panel 1 and navigates photos
+    if app.items.len() >= 2 {
+        app.handle_key(make_key(KeyCode::Down)).await.unwrap();
+        assert_eq!(
+            app.focused_pane,
+            PaneId::Library,
+            "Down arrow must automatically refocus Panel 1"
+        );
+        assert_eq!(app.selected_index, 1);
+        assert!(app.items[1].is_selected);
+
+        app.handle_key(make_key(KeyCode::Up)).await.unwrap();
+        assert_eq!(
+            app.focused_pane,
+            PaneId::Library,
+            "Up arrow must automatically refocus Panel 1"
+        );
+        assert_eq!(app.selected_index, 0);
+        assert!(app.items[0].is_selected);
+    }
+}

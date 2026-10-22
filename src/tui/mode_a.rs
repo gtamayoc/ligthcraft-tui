@@ -160,9 +160,8 @@ impl HistogramData {
         }
     }
 
-    /// Produce 4-line sparkline text for terminal display.
-    pub fn sparklines(&self) -> Vec<String> {
-        let chars = [' ', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+    /// Produce 4-line sparkline text for terminal display using specified glyph set.
+    pub fn sparklines_with_glyphs(&self, glyphs: &crate::tui::glyphs::GlyphSet) -> Vec<String> {
         let to_spark = |bins: &[u32; 32]| -> String {
             bins.iter()
                 .map(|&count| {
@@ -170,7 +169,7 @@ impl HistogramData {
                         ' '
                     } else {
                         let idx = ((count as f32 / self.max_count as f32) * 7.0).round() as usize;
-                        chars[idx.min(7)]
+                        glyphs.histogram_bar(idx)
                     }
                 })
                 .collect()
@@ -182,6 +181,11 @@ impl HistogramData {
             format!("Grn: [{}]", to_spark(&self.bins_g)),
             format!("Blu: [{}]", to_spark(&self.bins_b)),
         ]
+    }
+
+    /// Produce 4-line sparkline text for terminal display.
+    pub fn sparklines(&self) -> Vec<String> {
+        self.sparklines_with_glyphs(&crate::tui::glyphs::GlyphSet::Unicode)
     }
 }
 
@@ -482,41 +486,62 @@ pub fn render_mode_a(
     state: &ModeAState,
     _protocol: &GraphicsProtocol,
     is_focused: bool,
+    glyphs: &crate::tui::glyphs::GlyphSet,
 ) {
     match state.view_mode {
-        ModeAView::Hero => render_hero_view(frame, area, state, is_focused),
-        ModeAView::VariantMatrix => render_variant_matrix(frame, area, state, is_focused),
-        ModeAView::SplitView => render_split_view(frame, area, state, is_focused),
+        ModeAView::Hero => render_hero_view(frame, area, state, is_focused, glyphs),
+        ModeAView::VariantMatrix => render_variant_matrix(frame, area, state, is_focused, glyphs),
+        ModeAView::SplitView => render_split_view(frame, area, state, is_focused, glyphs),
     }
 }
 
-fn render_hero_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focused: bool) {
+fn render_hero_view(
+    frame: &mut Frame,
+    area: Rect,
+    state: &ModeAState,
+    is_focused: bool,
+    glyphs: &crate::tui::glyphs::GlyphSet,
+) {
+    let active_prefix = if is_focused {
+        format!("{} [ACTIVO] ", glyphs.step_arrow())
+    } else {
+        String::new()
+    };
+    let active_suffix = if is_focused {
+        format!(" {}", glyphs.step_left())
+    } else {
+        String::new()
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(if is_focused {
-            BorderType::Thick
+            BorderType::Double
         } else {
             BorderType::Rounded
         })
         .border_style(if is_focused {
-            Style::default().fg(Color::Cyan)
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         })
         .title(format!(
-            " {}2. PREVISUALIZADOR: {} [{} | {}]{} ",
-            if is_focused { "❯ [ACTIVO] " } else { "" },
+            " {}{}[2] Visor: {} [{} | {}]{} ",
+            active_prefix,
+            "",
             state.metadata.file_name,
             state.metadata.aspect_ratio_str(),
             state.metadata.megapixels_str(),
-            if is_focused { " ❮" } else { "" }
+            active_suffix,
         ));
 
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
     let details = format!(
-        "\n  Archivo Maestro RAW:  {}\n  Dimensiones:          {} x {} píxeles ({})\n  Cámara:               {}\n  Exposición:           {}\n  Ajuste Activo:        {}\n  Intensidad:           {:.0}%\n\n  ────────────────────────────────────────────────────────────\n  Flujo de Trabajo:\n    • Pulse [Tab] para alternar entre BIBLIOTECA y PREVISUALIZADOR\n    • Pulse [4] para ver Matriz de 4 Variantes de Color\n    • Pulse [E] para EXPORTAR variante seleccionada en máxima calidad (TIFF 16b + JPEG 100%)\n",
+        "\n  Archivo Maestro RAW:  {}\n  Dimensiones:          {} x {} píxeles ({})\n  Cámara:               {}\n  Exposición:           {}\n  Ajuste Activo:        {}\n  Intensidad:           {:.0}%\n\n  {}\n  Flujo de Trabajo:\n    {} Pulse [Tab] para alternar entre BIBLIOTECA y VISOR\n    {} Pulse [4] para ver Matriz de 4 Variantes de Color\n    {} Pulse [E] para EXPORTAR variante seleccionada en máxima calidad\n    {} Pulse [F1] para ver la Guía Completa de Atajos\n",
         state.metadata.file_name,
         state.metadata.width,
         state.metadata.height,
@@ -525,6 +550,11 @@ fn render_hero_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focuse
         state.metadata.exposure_summary(),
         state.active_recipe.name,
         state.active_intensity * 100.0,
+        glyphs.bar_horizontal().repeat(58),
+        glyphs.bullet(),
+        glyphs.bullet(),
+        glyphs.bullet(),
+        glyphs.bullet(),
     );
     let p = Paragraph::new(details)
         .alignment(Alignment::Left)
@@ -532,14 +562,28 @@ fn render_hero_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focuse
     frame.render_widget(p, inner);
 }
 
-fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_focused: bool) {
+fn render_variant_matrix(
+    frame: &mut Frame,
+    area: Rect,
+    state: &ModeAState,
+    is_focused: bool,
+    glyphs: &crate::tui::glyphs::GlyphSet,
+) {
     let rects = compute_variant_grid_rects(area, state.variant_count);
 
     for (idx, &sub_area) in rects.iter().enumerate() {
         if let Some(slot) = state.variants.get(idx) {
             let is_focused_slot = idx == state.focused_variant;
-            let fav_badge = if slot.is_favorite { " ★" } else { "" };
-            let sel_badge = if slot.is_selected { "[X] " } else { "" };
+            let fav_badge = if slot.is_favorite {
+                format!(" {}", glyphs.favorite_star())
+            } else {
+                String::new()
+            };
+            let sel_badge = if slot.is_selected {
+                format!("{} ", glyphs.check_box_checked())
+            } else {
+                String::new()
+            };
             let flag_badge = match slot.flag {
                 FlagStatus::Pick => " [P]",
                 FlagStatus::Reject => " [REJ]",
@@ -584,8 +628,8 @@ fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_f
 
             let block = Block::default()
                 .borders(Borders::ALL)
-                .border_type(if slot.is_selected || is_focused_slot {
-                    BorderType::Thick
+                .border_type(if slot.is_selected || (is_focused_slot && is_focused) {
+                    BorderType::Double
                 } else {
                     BorderType::Rounded
                 })
@@ -598,7 +642,11 @@ fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_f
                 })
                 .title(format!(
                     " {}{}{}{} ({}%){}{} ",
-                    if is_focused_slot { "► " } else { "" },
+                    if is_focused_slot {
+                        format!("{} ", glyphs.triangle_right())
+                    } else {
+                        String::new()
+                    },
                     sel_badge,
                     slot.index + 1,
                     if !slot.label.is_empty() {
@@ -615,18 +663,22 @@ fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_f
             frame.render_widget(block, box_area);
 
             let status_repr = match &slot.status {
-                VariantRenderStatus::Ready => "✔ Listo".to_string(),
-                VariantRenderStatus::Rendering { .. } => "⟳ Generando...".to_string(),
-                VariantRenderStatus::Pending => "⏳ Pendiente".to_string(),
-                VariantRenderStatus::Unloaded => "⏸ Sin cargar".to_string(),
-                VariantRenderStatus::Failed(err) => format!("✖ Error: {}", err),
+                VariantRenderStatus::Ready => format!("{} Listo", glyphs.ready_mark()),
+                VariantRenderStatus::Rendering { .. } => {
+                    format!("{} Generando...", glyphs.progress_spinner())
+                }
+                VariantRenderStatus::Pending => format!("{} Pendiente", glyphs.pending()),
+                VariantRenderStatus::Unloaded => format!("{} Sin cargar", glyphs.paused()),
+                VariantRenderStatus::Failed(err) => {
+                    format!("{} Error: {}", glyphs.error_mark(), err)
+                }
             };
 
             let text = format!(
                 "\n  Preset: {}\n  Rating: {}{}\n  Estado: {}",
                 slot.recipe.name,
-                "★".repeat(slot.rating as usize),
-                "☆".repeat(5 - slot.rating as usize),
+                glyphs.favorite_star().repeat(slot.rating as usize),
+                glyphs.star_empty().repeat(5 - slot.rating as usize),
                 status_repr
             );
             let p = Paragraph::new(text)
@@ -637,22 +689,32 @@ fn render_variant_matrix(frame: &mut Frame, area: Rect, state: &ModeAState, is_f
     }
 }
 
-fn render_split_view(frame: &mut Frame, area: Rect, state: &ModeAState, is_focused: bool) {
+fn render_split_view(
+    frame: &mut Frame,
+    area: Rect,
+    state: &ModeAState,
+    is_focused: bool,
+    glyphs: &crate::tui::glyphs::GlyphSet,
+) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_type(if is_focused {
-            BorderType::Thick
+            BorderType::Double
         } else {
             BorderType::Rounded
         })
         .border_style(if is_focused {
-            Style::default().fg(Color::Cyan)
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
         } else {
             Style::default().fg(Color::DarkGray)
         })
         .title(format!(
-            " ❯ Split-View Comparison: Before vs After [{:?}] ",
-            state.split_kind
+            " {} [2] Visor: Split Antes / Después [{:?}] {} ",
+            glyphs.step_arrow(),
+            state.split_kind,
+            glyphs.step_left(),
         ));
 
     let inner = block.inner(area);

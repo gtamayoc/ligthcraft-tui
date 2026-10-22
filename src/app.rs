@@ -4,10 +4,10 @@ use crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use image::DynamicImage;
-use ratatui::layout::{Alignment, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Tabs, Wrap};
 use ratatui::Frame;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -22,6 +22,7 @@ use crate::mcp::client::McpClient;
 use crate::storage::metadata::read_native_metadata;
 use crate::storage::presets_store::PresetStore;
 use crate::tui::event::{AppEvent, EventManager};
+use crate::tui::glyphs::GlyphSet;
 use crate::tui::layout::{AppLayout, PaneId};
 use crate::tui::mode_a::{render_mode_a, FlagStatus, ModeAState, ModeAView};
 use crate::tui::mode_b::{render_mode_b, ModeBState};
@@ -72,6 +73,9 @@ pub struct AppController {
     pub flow_state: InteractiveFlowState,
     pub event_sender: Option<tokio::sync::mpsc::Sender<AppEvent>>,
     pub flow_cancel_token: Option<CancellationToken>,
+    pub glyph_set: GlyphSet,
+    pub show_help_modal: bool,
+    pub help_active_tab: usize,
 }
 
 impl AppController {
@@ -163,8 +167,7 @@ impl AppController {
             cache,
             mcp_client,
             preset_store,
-            status_message:
-                "Listo. [↑/↓] Moverse por fotos | [Enter] Confirmar y continuar ❯ | [Space] Selección múltiple | [E] Asistente".into(),
+            status_message: "Listo. Navegue por fotos o pulse [F1] para ver atajos".into(),
             terminal_size: Rect::new(0, 0, 120, 30),
             needs_render: true,
             running: true,
@@ -173,6 +176,9 @@ impl AppController {
             flow_state: InteractiveFlowState::default(),
             event_sender: None,
             flow_cancel_token: None,
+            glyph_set: GlyphSet::detect(),
+            show_help_modal: false,
+            help_active_tab: 0,
         })
     }
 
@@ -451,6 +457,53 @@ impl AppController {
             return Ok(());
         }
 
+        // F1 or ? toggles Help Modal
+        if key.code == KeyCode::F(1) || key.code == KeyCode::Char('?') {
+            self.show_help_modal = !self.show_help_modal;
+            self.needs_render = true;
+            return Ok(());
+        }
+
+        // If Help Modal is open, handle tabs and dismiss keys, blocking background events
+        if self.show_help_modal {
+            match key.code {
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('Q') => {
+                    self.show_help_modal = false;
+                    self.needs_render = true;
+                }
+                KeyCode::Tab | KeyCode::Right => {
+                    self.help_active_tab = (self.help_active_tab + 1) % 4;
+                    self.needs_render = true;
+                }
+                KeyCode::BackTab | KeyCode::Left => {
+                    self.help_active_tab = if self.help_active_tab == 0 {
+                        3
+                    } else {
+                        self.help_active_tab - 1
+                    };
+                    self.needs_render = true;
+                }
+                KeyCode::Char('1') => {
+                    self.help_active_tab = 0;
+                    self.needs_render = true;
+                }
+                KeyCode::Char('2') => {
+                    self.help_active_tab = 1;
+                    self.needs_render = true;
+                }
+                KeyCode::Char('3') => {
+                    self.help_active_tab = 2;
+                    self.needs_render = true;
+                }
+                KeyCode::Char('4') => {
+                    self.help_active_tab = 3;
+                    self.needs_render = true;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
+
         // Active interactive top wizard flow
         if self.flow_state.is_active {
             self.handle_flow_key(key).await?;
@@ -548,50 +601,21 @@ impl AppController {
 
     async fn handle_mode_a_key(&mut self, key: KeyEvent) -> Result<(), AppError> {
         match key.code {
-            // Photo library navigation (Up / Down / Left / Right / k / j / h / l) with wrap-around
-            KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h')
-                if self.focused_pane == PaneId::Library =>
-            {
-                if !self.items.is_empty() {
-                    let old_idx = self.selected_index;
-                    let multi_selected = self.items.iter().filter(|i| i.is_selected).count() > 1;
-                    if self.selected_index > 0 {
-                        self.selected_index -= 1;
-                    } else {
-                        self.selected_index = self.items.len() - 1;
-                    }
-                    if !multi_selected {
-                        if let Some(old) = self.items.get_mut(old_idx) {
-                            old.is_selected = false;
-                        }
-                        if let Some(cur) = self.items.get_mut(self.selected_index) {
-                            cur.is_selected = true;
-                        }
-                    }
-                    self.sync_selected_photo().await?;
-                }
+            // Photo library navigation: Up and Down strictly dedicated to Panel 1 (and autofocuses Panel 1)
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.focused_pane = PaneId::Library;
+                self.navigate_photo_prev().await?;
             }
-            KeyCode::Down | KeyCode::Right | KeyCode::Char('j') | KeyCode::Char('l')
-                if self.focused_pane == PaneId::Library =>
-            {
-                if !self.items.is_empty() {
-                    let old_idx = self.selected_index;
-                    let multi_selected = self.items.iter().filter(|i| i.is_selected).count() > 1;
-                    if self.selected_index < self.items.len() - 1 {
-                        self.selected_index += 1;
-                    } else {
-                        self.selected_index = 0;
-                    }
-                    if !multi_selected {
-                        if let Some(old) = self.items.get_mut(old_idx) {
-                            old.is_selected = false;
-                        }
-                        if let Some(cur) = self.items.get_mut(self.selected_index) {
-                            cur.is_selected = true;
-                        }
-                    }
-                    self.sync_selected_photo().await?;
-                }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.focused_pane = PaneId::Library;
+                self.navigate_photo_next().await?;
+            }
+            // Left and Right in Panel 1 also navigate photos (backward/forward)
+            KeyCode::Left | KeyCode::Char('h') if self.focused_pane == PaneId::Library => {
+                self.navigate_photo_prev().await?;
+            }
+            KeyCode::Right | KeyCode::Char('l') if self.focused_pane == PaneId::Library => {
+                self.navigate_photo_next().await?;
             }
             KeyCode::Enter if self.focused_pane == PaneId::Library => {
                 if let Some(cur) = self.items.get_mut(self.selected_index) {
@@ -609,40 +633,26 @@ impl AppController {
                         "Foto {} {}",
                         item.filename,
                         if is_sel {
-                            "seleccionada [✓]"
+                            format!("seleccionada {}", self.glyph_set.check_box_checked())
                         } else {
-                            "deseleccionada [ ]"
+                            format!("deseleccionada {}", self.glyph_set.check_box_unchecked())
                         }
                     );
                 }
             }
 
-            // Photo navigation from PreviewCanvas (Hero and SplitView)
-            KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h')
+            // Photo horizontal navigation from PreviewCanvas (Hero and SplitView)
+            KeyCode::Left | KeyCode::Char('h')
                 if self.focused_pane == PaneId::PreviewCanvas
                     && self.mode_a.view_mode != ModeAView::VariantMatrix =>
             {
-                if !self.items.is_empty() {
-                    if self.selected_index > 0 {
-                        self.selected_index -= 1;
-                    } else {
-                        self.selected_index = self.items.len() - 1;
-                    }
-                    self.sync_selected_photo().await?;
-                }
+                self.navigate_photo_prev().await?;
             }
-            KeyCode::Down | KeyCode::Right | KeyCode::Char('j') | KeyCode::Char('l')
+            KeyCode::Right | KeyCode::Char('l')
                 if self.focused_pane == PaneId::PreviewCanvas
                     && self.mode_a.view_mode != ModeAView::VariantMatrix =>
             {
-                if !self.items.is_empty() {
-                    if self.selected_index < self.items.len() - 1 {
-                        self.selected_index += 1;
-                    } else {
-                        self.selected_index = 0;
-                    }
-                    self.sync_selected_photo().await?;
-                }
+                self.navigate_photo_next().await?;
             }
 
             // View modes (Hero, 2x2 Matrix, Split-View, 1:1 Loupe)
@@ -710,34 +720,6 @@ impl AppController {
                     self.mode_a.focused_variant = 0;
                 }
             }
-            KeyCode::Up | KeyCode::Char('k')
-                if self.mode_a.view_mode == ModeAView::VariantMatrix
-                    && self.focused_pane == PaneId::PreviewCanvas =>
-            {
-                let cols = match self.mode_a.variant_count {
-                    2 => 2,
-                    3 => 3,
-                    4 => 2,
-                    _ => 3,
-                };
-                if self.mode_a.focused_variant >= cols {
-                    self.mode_a.focused_variant -= cols;
-                }
-            }
-            KeyCode::Down | KeyCode::Char('j')
-                if self.mode_a.view_mode == ModeAView::VariantMatrix
-                    && self.focused_pane == PaneId::PreviewCanvas =>
-            {
-                let cols = match self.mode_a.variant_count {
-                    2 => 2,
-                    3 => 3,
-                    4 => 2,
-                    _ => 3,
-                };
-                if self.mode_a.focused_variant + cols < self.mode_a.variant_count {
-                    self.mode_a.focused_variant += cols;
-                }
-            }
             KeyCode::Enter
                 if self.mode_a.view_mode == ModeAView::VariantMatrix
                     && self.focused_pane == PaneId::PreviewCanvas =>
@@ -777,7 +759,10 @@ impl AppController {
                 if self.focused_pane == PaneId::PreviewCanvas =>
             {
                 self.mode_a.toggle_favorite();
-                self.status_message = "Toggled favorite (★) on active variant".into();
+                self.status_message = format!(
+                    "Toggled favorite ({}) on active variant",
+                    self.glyph_set.favorite_star()
+                );
             }
             KeyCode::Char('p') | KeyCode::Char('P') => {
                 self.mode_a.set_flag(FlagStatus::Pick);
@@ -973,15 +958,62 @@ impl AppController {
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent) {
+        if self.show_help_modal {
+            // Block background clicks when help modal is open
+            return;
+        }
         if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
             let layout = AppLayout::compute(self.terminal_size);
             if let Some(clicked) = layout.pane_at(mouse.column, mouse.row) {
-                // Solo cambiar foco si se hace clic dentro de uno de los 2 paneles interactivos
                 if [PaneId::Library, PaneId::PreviewCanvas].contains(&clicked) {
                     self.focused_pane = clicked;
                 }
             }
         }
+    }
+
+    async fn navigate_photo_prev(&mut self) -> Result<(), AppError> {
+        if !self.items.is_empty() {
+            let old_idx = self.selected_index;
+            let multi_selected = self.items.iter().filter(|i| i.is_selected).count() > 1;
+            if self.selected_index > 0 {
+                self.selected_index -= 1;
+            } else {
+                self.selected_index = self.items.len() - 1;
+            }
+            if !multi_selected {
+                if let Some(old) = self.items.get_mut(old_idx) {
+                    old.is_selected = false;
+                }
+                if let Some(cur) = self.items.get_mut(self.selected_index) {
+                    cur.is_selected = true;
+                }
+            }
+            self.sync_selected_photo().await?;
+        }
+        Ok(())
+    }
+
+    async fn navigate_photo_next(&mut self) -> Result<(), AppError> {
+        if !self.items.is_empty() {
+            let old_idx = self.selected_index;
+            let multi_selected = self.items.iter().filter(|i| i.is_selected).count() > 1;
+            if self.selected_index < self.items.len() - 1 {
+                self.selected_index += 1;
+            } else {
+                self.selected_index = 0;
+            }
+            if !multi_selected {
+                if let Some(old) = self.items.get_mut(old_idx) {
+                    old.is_selected = false;
+                }
+                if let Some(cur) = self.items.get_mut(self.selected_index) {
+                    cur.is_selected = true;
+                }
+            }
+            self.sync_selected_photo().await?;
+        }
+        Ok(())
     }
 
     async fn sync_selected_photo(&mut self) -> Result<(), AppError> {
@@ -1559,6 +1591,11 @@ impl AppController {
 
         // 4. Render Status Bar
         self.render_status(frame, layout.status_area);
+
+        // 5. Render Help Modal on top if active
+        if self.show_help_modal {
+            self.render_help_modal(frame);
+        }
     }
 
     fn render_too_small_overlay(&self, frame: &mut Frame, area: Rect) {
@@ -1595,14 +1632,13 @@ impl AppController {
             return;
         }
 
-        // Permanent Assistant guidance during standard browsing
-        let active_step = if self.focused_pane == PaneId::Library {
-            WizardStep::Photos
-        } else {
-            WizardStep::Variants
+        let mode_label = match self.mode {
+            AppMode::SinglePhoto => "Mode A",
+            AppMode::BatchQueue => "Mode B",
         };
 
-        let step1_style = if active_step == WizardStep::Photos {
+        let step1_active = self.focused_pane == PaneId::Library;
+        let step1_style = if step1_active {
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Cyan)
@@ -1610,7 +1646,7 @@ impl AppController {
         } else {
             Style::default().fg(Color::Cyan)
         };
-        let step2_style = if active_step == WizardStep::Variants {
+        let step2_style = if !step1_active {
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Yellow)
@@ -1619,132 +1655,46 @@ impl AppController {
             Style::default().fg(Color::Yellow)
         };
 
-        let mode_label = match self.mode {
-            AppMode::SinglePhoto => "Mode A",
-            AppMode::BatchQueue => "Mode B",
-        };
+        let app_name = Span::styled(
+            " LightCraft TUI ",
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        );
+        let mode_badge = Span::styled(
+            format!(" [{}] ", mode_label),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+        let sep1 = Span::styled(
+            format!(" {} ", self.glyph_set.separator()),
+            Style::default().fg(Color::DarkGray),
+        );
+        let step1 = Span::styled(" [1. Fotos] ", step1_style);
+        let arrow = Span::styled(
+            format!(" {} ", self.glyph_set.step_arrow()),
+            Style::default().fg(Color::DarkGray),
+        );
+        let step2 = Span::styled(" [2. Variantes] ", step2_style);
+        let sep2 = Span::styled(
+            format!(" {} ", self.glyph_set.separator()),
+            Style::default().fg(Color::DarkGray),
+        );
+        let mcp_badge = Span::styled(
+            " [MCP: OK] ",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        );
 
-        let breadcrumb_line = Line::from(vec![
-            Span::styled(
-                " LightCraft TUI ",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!(" [{}] ", mode_label),
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" | "),
-            Span::styled(
-                " [ASISTENTE] ",
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" "),
-            Span::styled(" [1. Fotos] ", step1_style),
-            Span::raw(" ❯ "),
-            Span::styled(" [2. Variantes] ", step2_style),
-            Span::styled(
-                " ❯ [3. Proporciones] ❯ [4. Formatos] ❯ [5. Resumen] ❯ [6. Renderizado] ",
-                Style::default().fg(Color::DarkGray),
-            ),
-            Span::styled(" [MCP: OK] ", Style::default().fg(Color::Green)),
+        let header_line = Line::from(vec![
+            app_name, mode_badge, sep1, step1, arrow, step2, sep2, mcp_badge,
         ]);
 
-        let (guide_line, help_line) = if active_step == WizardStep::Photos {
-            let photo_name = self
-                .items
-                .get(self.selected_index)
-                .map(|i| i.filename.as_str())
-                .unwrap_or("Sin fotos");
-            let sel_count = self.items.iter().filter(|i| i.is_selected).count();
-            (
-                Line::from(vec![
-                    Span::styled(
-                        " Foto activa: ",
-                        Style::default()
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!(" {} ", photo_name),
-                        Style::default()
-                            .fg(Color::LightCyan)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!(
-                            "[✓ {} seleccionada(s)] ({}x{}, ISO {}, {}) ",
-                            sel_count,
-                            self.mode_a.metadata.width,
-                            self.mode_a.metadata.height,
-                            self.mode_a.metadata.iso.map(|v| v.to_string()).unwrap_or_else(|| "N/A".into()),
-                            self.mode_a.metadata.camera_model.as_deref().unwrap_or("General")
-                        ),
-                        Style::default().fg(Color::Gray),
-                    ),
-                ]),
-                Line::from(vec![Span::styled(
-                    " [↑/↓] Moverse por fotos | [Enter] Confirmar y continuar a Variantes ❯ | [Space] Selección múltiple | [E] Asistente ",
-                    Style::default().fg(Color::Yellow),
-                )]),
-            )
-        } else {
-            let sel_var = self
-                .mode_a
-                .variants
-                .iter()
-                .take(self.mode_a.variant_count)
-                .filter(|v| v.is_selected)
-                .count();
-            (
-                Line::from(vec![
-                    Span::styled(
-                        " Matriz de Variantes: ",
-                        Style::default()
-                            .fg(Color::White)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!(" {} variante(s) seleccionadas ", sel_var),
-                        Style::default()
-                            .fg(Color::LightCyan)
-                            .add_modifier(Modifier::BOLD),
-                    ),
-                    Span::styled(
-                        format!(" | Receta activa: {} ", self.mode_a.active_recipe.name),
-                        Style::default().fg(Color::Gray),
-                    ),
-                ]),
-                Line::from(vec![Span::styled(
-                    " [←/→/↑/↓] Moverse | [Space] Alternar selección | [Enter] Promover | [E] Siguiente paso: Proporciones | [Tab] Fotos ",
-                    Style::default().fg(Color::Yellow),
-                )]),
-            )
-        };
-
-        if area.height <= 1 {
-            let p = Paragraph::new(breadcrumb_line);
-            frame.render_widget(p, area);
-        } else if area.height <= 3 {
-            let p = Paragraph::new(vec![breadcrumb_line, help_line]);
-            frame.render_widget(p, area);
-        } else {
-            let block = Block::default()
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::DarkGray))
-                .title(format!(" ❯ ASISTENTE DE FLUJO: {} ❮ ", active_step.title()));
-            let p = Paragraph::new(vec![breadcrumb_line, guide_line, help_line])
-                .block(block)
-                .wrap(Wrap { trim: false });
-            frame.render_widget(p, area);
-        }
+        let p = Paragraph::new(header_line);
+        frame.render_widget(p, area);
     }
 
     fn render_top_wizard_banner(&self, frame: &mut Frame, area: Rect) {
@@ -1788,6 +1738,7 @@ impl AppController {
             Style::default().fg(Color::LightCyan)
         };
 
+        let arr = self.glyph_set.step_arrow();
         let breadcrumb_line = Line::from(vec![
             Span::styled(
                 " [ASISTENTE] ",
@@ -1797,15 +1748,15 @@ impl AppController {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(" [1. Fotos] ", step1_style),
-            Span::raw("❯"),
+            Span::raw(arr),
             Span::styled(" [2. Variantes] ", step2_style),
-            Span::raw("❯"),
+            Span::raw(arr),
             Span::styled(" [3. Proporciones] ", step3_style),
-            Span::raw("❯"),
+            Span::raw(arr),
             Span::styled(" [4. Formatos] ", step4_style),
-            Span::raw("❯"),
+            Span::raw(arr),
             Span::styled(" [5. Resumen] ", step5_style),
-            Span::raw("❯"),
+            Span::raw(arr),
             Span::styled(" [6. Renderizado] ", step6_style),
         ]);
 
@@ -1838,9 +1789,9 @@ impl AppController {
                     let is_sel = self.flow_state.selected_ratios.contains(ratio);
                     let is_foc = idx == self.flow_state.focused_ratio_idx;
 
-                    let prefix = if is_foc { "► " } else { "  " };
-                    let suffix = if is_foc { " ◄" } else { "  " };
-                    let mark = if is_sel { "[✓]" } else { "[ ]" };
+                    let prefix = if is_foc { format!("{} ", self.glyph_set.triangle_right()) } else { "  ".to_string() };
+                    let suffix = if is_foc { format!(" {}", self.glyph_set.triangle_left()) } else { "  ".to_string() };
+                    let mark = if is_sel { self.glyph_set.check_box_checked() } else { self.glyph_set.check_box_unchecked() };
                     let item_text = format!("{}{}[{}] {}{}", prefix, mark, key_num, label, suffix);
 
                     let style = if is_sel {
@@ -1866,9 +1817,9 @@ impl AppController {
                 // Opción 7: Todas
                 let all_sel = self.flow_state.selected_ratios.len() == AspectRatio::ALL.len();
                 let all_foc = self.flow_state.focused_ratio_idx == 6;
-                let all_prefix = if all_foc { "► " } else { "  " };
-                let all_suffix = if all_foc { " ◄" } else { "  " };
-                let all_mark = if all_sel { "[✓]" } else { "[ ]" };
+                let all_prefix = if all_foc { format!("{} ", self.glyph_set.triangle_right()) } else { "  ".to_string() };
+                let all_suffix = if all_foc { format!(" {}", self.glyph_set.triangle_left()) } else { "  ".to_string() };
+                let all_mark = if all_sel { self.glyph_set.check_box_checked() } else { self.glyph_set.check_box_unchecked() };
                 let all_text = format!("{}{}[A] Todas{}", all_prefix, all_mark, all_suffix);
                 let all_style = if all_sel {
                     let mut st = Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD);
@@ -1888,7 +1839,12 @@ impl AppController {
                 (
                     Line::from(spans),
                     Line::from(vec![Span::styled(
-                        " [←/→] Moverse | [Espacio] Seleccionar/Desmarcar [✓] | [Enter] Continuar a Formatos ❯ | [1..6/A] Atajo | [B] Volver | [Esc] Cancelar ",
+                        format!(
+                            " [{}] Moverse | [Espacio] Seleccionar/Desmarcar {} | [Enter] Continuar a Formatos {} | [1..6/A] Atajo | [B] Volver | [Esc] Cancelar ",
+                            self.glyph_set.arrow_left_right(),
+                            self.glyph_set.check_box_checked(),
+                            self.glyph_set.step_arrow()
+                        ),
                         Style::default().fg(Color::Yellow),
                     )]),
                 )
@@ -1927,9 +1883,9 @@ impl AppController {
                 let mut spans = Vec::new();
                 for (idx, (key_num, label, is_sel)) in format_items.iter().enumerate() {
                     let is_foc = idx == self.flow_state.focused_format_idx;
-                    let prefix = if is_foc { "► " } else { "  " };
-                    let suffix = if is_foc { " ◄" } else { "  " };
-                    let mark = if *is_sel { "[✓]" } else { "[ ]" };
+                    let prefix = if is_foc { format!("{} ", self.glyph_set.triangle_right()) } else { "  ".to_string() };
+                    let suffix = if is_foc { format!(" {}", self.glyph_set.triangle_left()) } else { "  ".to_string() };
+                    let mark = if *is_sel { self.glyph_set.check_box_checked() } else { self.glyph_set.check_box_unchecked() };
                     let item_text = format!("{}{}[{}] {}{}", prefix, mark, key_num, label, suffix);
 
                     let style = if *is_sel {
@@ -1955,7 +1911,12 @@ impl AppController {
                 (
                     Line::from(spans),
                     Line::from(vec![Span::styled(
-                        " [←/→] Moverse | [Espacio] Seleccionar formato [✓] | [Enter] Continuar al Resumen ❯ | [1..5] Atajo | [B] Proporciones | [Esc] Salir ",
+                        format!(
+                            " [{}] Moverse | [Espacio] Seleccionar formato {} | [Enter] Continuar al Resumen {} | [1..5] Atajo | [B] Proporciones | [Esc] Salir ",
+                            self.glyph_set.arrow_left_right(),
+                            self.glyph_set.check_box_checked(),
+                            self.glyph_set.step_arrow()
+                        ),
                         Style::default().fg(Color::Yellow),
                     )]),
                 )
@@ -1979,8 +1940,8 @@ impl AppController {
                 let mut action_spans = Vec::new();
                 for (idx, label) in summary_actions {
                     let is_foc = idx == self.flow_state.focused_summary_idx;
-                    let prefix = if is_foc { "► " } else { " " };
-                    let suffix = if is_foc { " ◄" } else { " " };
+                    let prefix = if is_foc { format!("{} ", self.glyph_set.triangle_right()) } else { " ".to_string() };
+                    let suffix = if is_foc { format!(" {}", self.glyph_set.triangle_left()) } else { " ".to_string() };
                     let text = format!("{}{}{}", prefix, label, suffix);
 
                     let style = if idx == 0 {
@@ -2002,8 +1963,8 @@ impl AppController {
                     Line::from(vec![
                         Span::styled(
                             format!(
-                                " TOTAL ESTIMADO: {} foto(s) × {} variante(s) × {} proporción(es) × {} formato(s) = {} ARCHIVOS ",
-                                plan.photos_count, plan.variants_count, plan.ratios_count, plan.formats_count, plan.total_output_files()
+                                " TOTAL ESTIMADO: {} foto(s) {} {} variante(s) {} {} proporción(es) {} {} formato(s) = {} ARCHIVOS ",
+                                plan.photos_count, self.glyph_set.times(), plan.variants_count, self.glyph_set.times(), plan.ratios_count, self.glyph_set.times(), plan.formats_count, plan.total_output_files()
                             ),
                             Style::default()
                                 .fg(Color::Green)
@@ -2050,12 +2011,12 @@ impl AppController {
                         ]),
                     )
                 } else {
-                    let spinner_frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-                    let spinner = spinner_frames[(self.flow_state.export_completed * 2) % spinner_frames.len()];
+                    let spinner = self.glyph_set.spinner_frame(self.flow_state.export_completed * 2);
                     let pct = self.flow_state.export_percent.clamp(0.0, 100.0);
                     let filled = ((pct / 100.0) * 20.0).round() as usize;
                     let empty = 20usize.saturating_sub(filled);
-                    let bar = format!("[{}{}] {:.1}%", "█".repeat(filled), "░".repeat(empty), pct);
+                    let (fill_c, empty_c) = self.glyph_set.progress_bar_chars();
+                    let bar = format!("[{}{}] {:.1}%", fill_c.to_string().repeat(filled), empty_c.to_string().repeat(empty), pct);
 
                     let elapsed = self
                         .flow_state
@@ -2139,7 +2100,12 @@ impl AppController {
                     .fg(border_color)
                     .add_modifier(Modifier::BOLD),
             )
-            .title(format!(" ❯ {} ❮ ", step_title));
+            .title(format!(
+                " {} {} {} ",
+                self.glyph_set.step_arrow(),
+                step_title,
+                self.glyph_set.step_left()
+            ));
 
         let paragraph = Paragraph::new(vec![breadcrumb_line, info_line, help_line])
             .block(block)
@@ -2149,10 +2115,11 @@ impl AppController {
 
     fn render_library(&self, frame: &mut Frame, area: Rect, layout: &AppLayout) {
         let is_pane_focused = self.focused_pane == PaneId::Library;
-        let block = layout.block_for(
+        let block = layout.block_for_with_glyphs(
             PaneId::Library,
             self.focused_pane,
-            "1. BIBLIOTECA (Archivos RAW/Imágenes)",
+            "[1] Biblioteca",
+            &self.glyph_set,
         );
         let inner = block.inner(area);
         let max_visible = inner.height as usize;
@@ -2177,12 +2144,24 @@ impl AppController {
             .map(|(idx, item)| {
                 let is_focused = idx == self.selected_index;
                 let is_sel = item.is_selected;
-                let prefix = if is_focused { "► " } else { "  " };
-                let suffix = if is_focused { " ◄" } else { "  " };
-                let flag = if is_sel { "[✓] " } else { "[ ] " };
+                let prefix = if is_focused {
+                    format!("{} ", self.glyph_set.triangle_right())
+                } else {
+                    "  ".to_string()
+                };
+                let suffix = if is_focused {
+                    format!(" {}", self.glyph_set.triangle_left())
+                } else {
+                    "  ".to_string()
+                };
+                let flag = if is_sel {
+                    format!("{} ", self.glyph_set.check_box_checked())
+                } else {
+                    format!("{} ", self.glyph_set.check_box_unchecked())
+                };
                 let raw_badge = if item.is_cr3 { " [CR3]" } else { " [IMG]" };
                 let star_badge = if item.rating > 0 {
-                    format!(" {}★", item.rating)
+                    format!(" {}{}", item.rating, self.glyph_set.favorite_star())
                 } else {
                     "".into()
                 };
@@ -2199,15 +2178,25 @@ impl AppController {
                     let mut st = Style::default()
                         .fg(Color::LightCyan)
                         .add_modifier(Modifier::BOLD);
-                    if is_focused && is_pane_focused {
-                        st = st.bg(Color::Rgb(20, 50, 80));
+                    if is_focused {
+                        st = st.bg(if is_pane_focused {
+                            Color::Rgb(20, 50, 80)
+                        } else {
+                            Color::Rgb(15, 30, 45)
+                        });
                     }
                     st
                 } else {
                     // Blanco sin selección
                     let mut st = Style::default().fg(Color::White);
-                    if is_focused && is_pane_focused {
-                        st = st.bg(Color::Rgb(50, 50, 50)).add_modifier(Modifier::BOLD);
+                    if is_focused {
+                        st = st
+                            .bg(if is_pane_focused {
+                                Color::Rgb(50, 50, 50)
+                            } else {
+                                Color::Rgb(30, 30, 30)
+                            })
+                            .add_modifier(Modifier::BOLD);
                     }
                     st
                 };
@@ -2226,21 +2215,23 @@ impl AppController {
     fn render_center(&self, frame: &mut Frame, area: Rect) {
         let is_focused = self.focused_pane == PaneId::PreviewCanvas;
         match self.mode {
-            AppMode::SinglePhoto => {
-                render_mode_a(frame, area, &self.mode_a, &self.graphics, is_focused)
+            AppMode::SinglePhoto => render_mode_a(
+                frame,
+                area,
+                &self.mode_a,
+                &self.graphics,
+                is_focused,
+                &self.glyph_set,
+            ),
+            AppMode::BatchQueue => {
+                render_mode_b(frame, area, &self.mode_b, is_focused, &self.glyph_set)
             }
-            AppMode::BatchQueue => render_mode_b(frame, area, &self.mode_b, is_focused),
         }
     }
 
     fn render_status(&self, frame: &mut Frame, area: Rect) {
         if self.export_prompt {
-            let targets = self.mode_a.get_selected_or_focused_indices();
-            let prompt_text = format!(
-                " EXPORTACIÓN: {} variante(s) seleccionada(s) | [1] Solo TIFF | [2] Solo JPEG | [3 / Enter] Ambos (TIFF + JPEG) | [Esc] Cancelar ",
-                targets.len()
-            );
-            let p = Paragraph::new(Line::from(vec![
+            let prompt_line = Line::from(vec![
                 Span::styled(
                     " [EXPORTAR FORMATO] ",
                     Style::default()
@@ -2249,87 +2240,326 @@ impl AppController {
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(
-                    prompt_text,
+                    " [1] Solo TIFF | [2] Solo JPEG | [3 / Enter] Ambos (TIFF + JPEG) | [Esc] Cancelar ",
                     Style::default()
                         .fg(Color::White)
                         .bg(Color::DarkGray)
                         .add_modifier(Modifier::BOLD),
                 ),
-            ]));
-            frame.render_widget(p, area);
+            ]);
+            frame.render_widget(Paragraph::new(prompt_line), area);
             return;
         }
 
-        let active_pane_str = match self.focused_pane {
-            PaneId::Library => "Panel Activo: [1. BIBLIOTECA]",
-            PaneId::PreviewCanvas => "Panel Activo: [2. PREVISUALIZADOR]",
-            PaneId::QueueStatus => "Panel Activo: [COLA/ESTADO]",
+        let total_w = area.width as usize;
+        let total_items = self.items.len();
+        let current_idx = if total_items == 0 {
+            0
+        } else {
+            self.selected_index + 1
         };
-        let selected_count = format!(
-            "Foto {}/{} ",
-            self.selected_index + 1,
-            self.items.len().max(1)
+        let photo_name = self
+            .items
+            .get(self.selected_index)
+            .map(|i| i.filename.as_str())
+            .unwrap_or("Sin fotos");
+
+        // 1. Sección izquierda: Contador de foto activa (`Foto X/Y`) y nombre del archivo seleccionado
+        let left_str = format!(
+            " Foto {}/{} | {} ",
+            current_idx,
+            total_items.max(1),
+            photo_name
         );
-        let left_part = Span::styled(
-            selected_count,
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        );
-        let pane_badge = Span::styled(
-            format!(" {} ", active_pane_str),
+        let left_span = Span::styled(
+            left_str,
             Style::default()
                 .fg(Color::Black)
                 .bg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         );
-        let right_part = Span::styled(
-            format!(" {} ", self.status_message),
-            Style::default().fg(Color::White).bg(Color::DarkGray),
+
+        // 2. Sección derecha: Indicador compacto de comandos globales: `[F1 Ayuda]  [Tab Panel]  [Q Salir]`
+        let right_str = " [F1 Ayuda]  [Tab Panel]  [Q Salir] ";
+        let right_span = Span::styled(
+            right_str,
+            Style::default()
+                .fg(Color::Yellow)
+                .bg(Color::Black)
+                .add_modifier(Modifier::BOLD),
         );
 
-        // Variant progress badge if in VariantMatrix view
-        let variant_badge = if self.mode_a.view_mode == ModeAView::VariantMatrix {
-            let ready_count = self
-                .mode_a
-                .variants
-                .iter()
-                .take(self.mode_a.variant_count)
-                .filter(|v| matches!(v.status, crate::tui::mode_a::VariantRenderStatus::Ready))
-                .count();
-            let total = self.mode_a.variant_count;
-            let sel_count = self
-                .mode_a
-                .variants
-                .iter()
-                .take(total)
-                .filter(|v| v.is_selected)
-                .count();
-            let sel_str = if sel_count > 0 {
-                format!(" [Sel: {}]", sel_count)
-            } else {
-                String::new()
-            };
-            format!(" [Var: {}/{}{}]", ready_count, total, sel_str)
+        // 3. Sección central: Mensaje de estado dinámico o badge de selección (`Sel: N`)
+        let sel_count = self.items.iter().filter(|i| i.is_selected).count();
+        let sel_badge = if sel_count > 1 {
+            format!("[Sel: {}] ", sel_count)
         } else {
             String::new()
         };
 
-        let help_text = match (self.focused_pane, self.mode_a.view_mode) {
-            (PaneId::Library, _) => " | [↑/↓/←/→]: Fotos | [Space]: Sel [X] | [Tab]: Ir a Canvas | [F5/R]: Refrescar | [E]: Exportar Max Calidad | [Q]: Salir ",
-            (PaneId::PreviewCanvas, ModeAView::VariantMatrix) => " | [←/→/↑/↓]: Variantes | [Space]: Sel [X] | [F]: Fav ★ | [Enter]: Promover | [E]: Exportar Lote | [1]: Hero | [F5/R]: Refrescar | [Q]: Salir ",
-            (PaneId::PreviewCanvas, _) => " | [↑/↓/←/→]: Fotos | [1]: Hero | [2/4/6]: Matriz Variantes | [S]: Split A/B | [F5/R]: Refrescar | [E]: Exportar Max Calidad | [Q]: Salir ",
-            _ => " | [Tab]: Foco 1↔2 | [F5/R]: Refrescar Pantalla | [E]: Exportar Max Calidad | [Q]: Salir ",
+        let raw_status = format!(" {}{} ", sel_badge, self.status_message.trim());
+        let left_len = left_span.width();
+        let right_len = right_span.width();
+
+        // Calculate space for central message and padding to keep strictly 1 line
+        let avail_center = total_w.saturating_sub(left_len + right_len);
+        let center_text = if raw_status.chars().count() > avail_center {
+            if avail_center > 3 {
+                let keep = avail_center.saturating_sub(3);
+                format!("{}...", raw_status.chars().take(keep).collect::<String>())
+            } else {
+                String::new()
+            }
+        } else {
+            raw_status
         };
 
-        let help_guide = Span::styled(
-            format!("{}{}", variant_badge, help_text),
-            Style::default().fg(Color::Yellow).bg(Color::Black),
+        let center_span = Span::styled(
+            center_text,
+            Style::default().fg(Color::White).bg(Color::DarkGray),
         );
 
-        let line = Line::from(vec![left_part, pane_badge, right_part, help_guide]);
-        let p = Paragraph::new(line).wrap(Wrap { trim: true });
+        let used_len = left_len + center_span.width() + right_len;
+        let padding = total_w.saturating_sub(used_len);
+        let pad_span = Span::raw(" ".repeat(padding));
+
+        let status_line = Line::from(vec![left_span, center_span, pad_span, right_span]);
+        let p = Paragraph::new(status_line);
         frame.render_widget(p, area);
+    }
+
+    fn render_help_modal(&self, frame: &mut Frame) {
+        let area = frame.area();
+        // FR-3: 75% width, 70% height
+        let modal_w = ((area.width as u32 * 75) / 100)
+            .max(50)
+            .min(area.width as u32) as u16;
+        let modal_h = ((area.height as u32 * 70) / 100)
+            .max(16)
+            .min(area.height as u32) as u16;
+        let x = (area.width.saturating_sub(modal_w)) / 2;
+        let y = (area.height.saturating_sub(modal_h)) / 2;
+        let modal_area = Rect::new(x, y, modal_w, modal_h);
+
+        // Clear background under modal
+        frame.render_widget(Clear, modal_area);
+
+        let glyph_mode_tag = if self.glyph_set.is_ascii() {
+            "Modo ASCII"
+        } else {
+            "Modo UTF-8"
+        };
+
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_set(self.glyph_set.border_set(true))
+            .border_style(
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .title(format!(
+                " {} GUÍA DE COMANDOS Y ATAJOS [{}] {} ",
+                self.glyph_set.step_arrow(),
+                glyph_mode_tag,
+                self.glyph_set.step_left(),
+            ))
+            .title_alignment(Alignment::Center);
+
+        let inner = block.inner(modal_area);
+        frame.render_widget(block, modal_area);
+
+        if inner.height < 5 || inner.width < 30 {
+            return;
+        }
+
+        let vert = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(2), // Tabs
+                Constraint::Min(4),    // Tab content
+                Constraint::Length(1), // Footer hint
+            ])
+            .split(inner);
+
+        // 1. Tabs
+        let tab_titles = vec![
+            "[1] General",
+            "[2] Biblioteca",
+            "[3] Variantes/Visor",
+            "[4] Exportar",
+        ];
+        let tabs = Tabs::new(tab_titles)
+            .select(self.help_active_tab)
+            .style(Style::default().fg(Color::DarkGray))
+            .highlight_style(
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )
+            .divider(Span::styled(
+                format!(" {} ", self.glyph_set.separator()),
+                Style::default().fg(Color::DarkGray),
+            ));
+        frame.render_widget(tabs, vert[0]);
+
+        // 2. Tab Content
+        let b = self.glyph_set.bullet();
+        let arr = self.glyph_set.step_arrow();
+        let star = self.glyph_set.favorite_star();
+        let chk = self.glyph_set.check_box_checked();
+
+        let content_lines = match self.help_active_tab {
+            0 => vec![
+                Line::from(vec![
+                    Span::styled("NAVEGACIÓN GLOBAL Y ENTORNO", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [Tab] / [Shift+Tab]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Alternar foco entre Biblioteca (Panel 1) y Visor/Canvas (Panel 2).", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [M] / [F10]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Alternar entre Modo A (Inspección individual) y Modo B (Cola de lotes).", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [F5] / [R] / [Ctrl+L]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Forzar redibujado de la terminal y restablecer caché gráfica.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [F1] / [?]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Abrir o cerrar esta ventana de ayuda y tutorial.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [Q] / [Ctrl+C]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Salir de la aplicación de forma segura restaurando la consola.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled(format!("  {} Glifos y compatibilidad: ", arr), Style::default().fg(Color::LightCyan)),
+                    Span::styled("Si su terminal no soporta Unicode, ejecute con '--ascii' o 'LC_ASCII=1' para fallback seguro.", Style::default().fg(Color::DarkGray)),
+                ]),
+            ],
+            1 => vec![
+                Line::from(vec![
+                    Span::styled("PANEL 1: BIBLIOTECA DE FOTOS RAW", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [{}] / [k] / [j]: ", b, self.glyph_set.arrow_up_down()), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Moverse verticalmente por las fotos RAW / imágenes encontradas.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [Enter]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Confirmar foto activa y transferir el foco al Visor de Variantes.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [Espacio]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("Marcar / desmarcar foto actual para selección múltiple ({}).", chk), Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [E]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Lanzar el Asistente de Exportación interactivo para la selección.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [F5] / [R]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Recargar directorio DRAW y metadatos EXIF / RAW.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled(format!("  {} Inmutabilidad garantizada: ", arr), Style::default().fg(Color::Green)),
+                    Span::styled("Los archivos RAW originales nunca son modificados en disco (SHA-256 verificado).", Style::default().fg(Color::DarkGray)),
+                ]),
+            ],
+            2 => vec![
+                Line::from(vec![
+                    Span::styled("PANEL 2: VISOR, MATRIZ DE VARIANTES Y COMPARACIÓN", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [{}] / [h] / [l]: ", b, self.glyph_set.arrow_left_right()), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Navegar entre las variantes de color generadas por el motor.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [Espacio]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("Marcar o desmarcar variante para exportación ({}).", chk), Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [F]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled(format!("Marcar / alternar variante activa como favorita ({}).", star), Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [Enter]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Promover la variante seleccionada como receta activa principal.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [1] / [2] / [4]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Cambiar modo de vista: [1] Hero individual, [2] Doble, [4] Matriz de 4.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [S]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Alternar modo Split-View Antes / Después (A/B comparativo).", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [E]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Continuar al Asistente de Proporciones y Formatos de Exportación.", Style::default().fg(Color::Gray)),
+                ]),
+            ],
+            _ => vec![
+                Line::from(vec![
+                    Span::styled("ASISTENTE DE FLUJO Y EXPORTACIÓN", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} Paso 1 & 2: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Seleccionar foto(s) RAW y variante(s) de revelado deseadas.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} Paso 3 (Proporciones): ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("[1..6] Atajos directos (1:1, 3:2, 16:9, etc.), [A] Todas, [Espacio] Toggle.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} Paso 4 (Formatos): ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("[1] TIFF 16-bit | [2] JPEG 100% | [3] PNG | [4] TIFF+JPEG | [5] Todos.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} Paso 5 (Resumen y Preset): ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("[Enter] Iniciar renderizado masivo sin bloqueo | [P] Guardar como preset.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [B] / [Retroceso]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Regresar al paso anterior conservando todas las opciones marcadas.", Style::default().fg(Color::Gray)),
+                ]),
+                Line::from(vec![
+                    Span::styled(format!("  {} [Esc]: ", b), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                    Span::styled("Cancelar el asistente y volver al área de trabajo principal.", Style::default().fg(Color::Gray)),
+                ]),
+            ],
+        };
+
+        let content_p = Paragraph::new(content_lines).wrap(Wrap { trim: false });
+        frame.render_widget(content_p, vert[1]);
+
+        // 3. Footer navigation
+        let footer_hint = Line::from(vec![
+            Span::styled(
+                " [Tab / 1..4 / Flechas] ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Cambiar pestaña   ", Style::default().fg(Color::Gray)),
+            Span::styled(
+                format!("{}   ", self.glyph_set.separator()),
+                Style::default().fg(Color::DarkGray),
+            ),
+            Span::styled(
+                " [Esc / F1 / Q] ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("Cerrar ventana de ayuda", Style::default().fg(Color::Gray)),
+        ]);
+        let footer_p = Paragraph::new(footer_hint).alignment(Alignment::Center);
+        frame.render_widget(footer_p, vert[2]);
     }
 }

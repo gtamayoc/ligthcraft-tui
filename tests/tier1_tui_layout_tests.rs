@@ -312,9 +312,10 @@ async fn test_t1_tui02_04_ratatui_test_backend_full_render() {
 
     assert!(content.contains("LightCraft TUI"));
     assert!(content.contains("Mode A"));
-    assert!(content.contains("1. BIBLIOTECA"));
-    assert!(!content.contains("3. INSPECTOR"));
-    assert!(content.contains("Panel Activo"));
+    assert!(content.contains("[1] Biblioteca"));
+    assert!(!content.contains("[3] Inspector"));
+    assert!(content.contains("[F1 Ayuda]"));
+    assert!(content.contains("[Tab Panel]"));
 }
 
 #[tokio::test]
@@ -676,5 +677,285 @@ async fn test_arrow_keys_navigation_and_wrapping_in_library_and_canvas() {
             app.selected_index, 1,
             "Right arrow in PreviewCanvas should advance photo"
         );
+    }
+}
+
+#[tokio::test]
+async fn test_help_modal_toggle_and_tab_navigation() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
+
+    assert!(!app.show_help_modal);
+    assert_eq!(app.help_active_tab, 0);
+
+    // 1. Open with F1
+    app.handle_key(KeyEvent {
+        code: KeyCode::F(1),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    })
+    .await
+    .unwrap();
+    assert!(app.show_help_modal);
+
+    // 2. Tab switching with numbers 1..4 (0-indexed tabs 0..3)
+    app.handle_key(KeyEvent {
+        code: KeyCode::Char('2'),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    })
+    .await
+    .unwrap();
+    assert_eq!(app.help_active_tab, 1);
+
+    app.handle_key(KeyEvent {
+        code: KeyCode::Char('4'),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    })
+    .await
+    .unwrap();
+    assert_eq!(app.help_active_tab, 3);
+
+    // 3. Tab cycling with Tab and Right
+    app.handle_key(KeyEvent {
+        code: KeyCode::Tab,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    })
+    .await
+    .unwrap();
+    assert_eq!(app.help_active_tab, 0, "Tab should wrap around to 0");
+
+    app.handle_key(KeyEvent {
+        code: KeyCode::Right,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    })
+    .await
+    .unwrap();
+    assert_eq!(app.help_active_tab, 1);
+
+    // 4. Tab cycling backward with Left and BackTab
+    app.handle_key(KeyEvent {
+        code: KeyCode::Left,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    })
+    .await
+    .unwrap();
+    assert_eq!(app.help_active_tab, 0);
+
+    app.handle_key(KeyEvent {
+        code: KeyCode::BackTab,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    })
+    .await
+    .unwrap();
+    assert_eq!(app.help_active_tab, 3, "BackTab should wrap around to 3");
+
+    // 5. Normal keys (like 'e' for export, or 'm' for mode) must be suppressed when modal is open
+    let old_mode = app.mode;
+    app.handle_key(KeyEvent {
+        code: KeyCode::Char('m'),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        app.mode, old_mode,
+        "Mode should not change while help modal is open"
+    );
+
+    // 6. Close with Esc
+    app.handle_key(KeyEvent {
+        code: KeyCode::Esc,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    })
+    .await
+    .unwrap();
+    assert!(!app.show_help_modal);
+
+    // 7. Open with '?' and close with 'q'
+    app.handle_key(KeyEvent {
+        code: KeyCode::Char('?'),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    })
+    .await
+    .unwrap();
+    assert!(app.show_help_modal);
+
+    app.handle_key(KeyEvent {
+        code: KeyCode::Char('q'),
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    })
+    .await
+    .unwrap();
+    assert!(!app.show_help_modal);
+}
+
+#[tokio::test]
+async fn test_help_modal_rendering_with_test_backend() {
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
+
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    // Open help modal
+    app.show_help_modal = true;
+    app.help_active_tab = 0;
+
+    terminal.draw(|frame| app.render(frame)).unwrap();
+
+    let buffer = terminal.backend().buffer();
+    let content: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+
+    assert!(content.contains("GUÍA DE COMANDOS Y ATAJOS"));
+    assert!(content.contains("[1] General"));
+    assert!(content.contains("[2] Biblioteca"));
+    assert!(content.contains("[3] Variantes"));
+    assert!(content.contains("[4] Exportar"));
+    assert!(content.contains("Cerrar"));
+
+    // Render tab 1 (Biblioteca)
+    app.help_active_tab = 1;
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    let buffer2 = terminal.backend().buffer();
+    let content2: String = buffer2.content().iter().map(|cell| cell.symbol()).collect();
+    assert!(content2.contains("BIBLIOTECA DE FOTOS RAW"));
+
+    // Render tab 3 (Exportar)
+    app.help_active_tab = 3;
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    let buffer3 = terminal.backend().buffer();
+    let content3: String = buffer3.content().iter().map(|cell| cell.symbol()).collect();
+    assert!(content3.contains("Exportar"));
+}
+
+#[test]
+fn test_glyph_set_ascii_mode_purity() {
+    use lightcraft_tui::tui::GlyphSet;
+
+    let ascii = GlyphSet::Ascii;
+    assert!(ascii.is_ascii());
+
+    assert!(ascii.step_arrow().is_ascii());
+    assert!(ascii.step_left().is_ascii());
+    assert!(ascii.check_mark().is_ascii());
+    assert!(ascii.check_box_checked().is_ascii());
+    assert!(ascii.check_box_unchecked().is_ascii());
+    assert!(ascii.favorite_star().is_ascii());
+    assert!(ascii.star_empty().is_ascii());
+    assert!(ascii.triangle_left().is_ascii());
+    assert!(ascii.triangle_right().is_ascii());
+    assert!(ascii.bullet().is_ascii());
+    assert!(ascii.separator().is_ascii());
+    assert!(ascii.bar_horizontal().is_ascii());
+    assert!(ascii.arrow_up().is_ascii());
+    assert!(ascii.arrow_down().is_ascii());
+    assert!(ascii.ready_mark().is_ascii());
+    assert!(ascii.error_mark().is_ascii());
+    assert!(ascii.progress_spinner().is_ascii());
+    assert!(ascii.pending().is_ascii());
+    assert!(ascii.paused().is_ascii());
+
+    assert!(ascii.arrow_left_right().is_ascii());
+    assert!(ascii.arrow_up_down().is_ascii());
+    assert!(ascii.arrow_left().is_ascii());
+    assert!(ascii.arrow_right().is_ascii());
+    assert!(ascii.times().is_ascii());
+
+    for i in 0..8 {
+        assert!(ascii.histogram_bar(i).is_ascii());
+    }
+}
+
+#[tokio::test]
+async fn test_full_render_ascii_mode_buffer_purity() {
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
+
+    app.glyph_set = lightcraft_tui::tui::GlyphSet::Ascii;
+
+    let backend = TestBackend::new(120, 40);
+    let mut terminal = Terminal::new(backend).unwrap();
+
+    // 1. Draw standard app in ASCII mode
+    terminal.draw(|frame| app.render(frame)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let content: String = buffer.content().iter().map(|cell| cell.symbol()).collect();
+
+    // Must contain ASCII panel indicators
+    assert!(content.contains("> [1] Biblioteca <") || content.contains("[1] Biblioteca"));
+    assert!(content.contains("[F1 Ayuda]"));
+    assert!(content.contains("[Tab Panel]"));
+    assert!(content.contains("[Q Salir]"));
+
+    // Must NOT contain Unicode ornamental arrows, stars, or checks
+    assert!(!content.contains('❯'));
+    assert!(!content.contains('❮'));
+    assert!(!content.contains('★'));
+    assert!(!content.contains('✓'));
+
+    // 2. Open help modal in ASCII mode
+    app.show_help_modal = true;
+    for tab in 0..4 {
+        app.help_active_tab = tab;
+        terminal.draw(|frame| app.render(frame)).unwrap();
+        let modal_buf = terminal.backend().buffer();
+        let modal_content: String = modal_buf
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+
+        assert!(modal_content.contains("GUÍA DE COMANDOS Y ATAJOS [Modo ASCII]"));
+        assert!(!modal_content.contains('❯'));
+        assert!(!modal_content.contains('❮'));
+        assert!(!modal_content.contains('★'));
+        assert!(!modal_content.contains('✓'));
     }
 }

@@ -17,6 +17,10 @@ use ratatui::Terminal;
 use crate::error::AppError;
 
 static TERMINAL_INITIALIZED: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
+static ORIGINAL_OUTPUT_CP: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+#[cfg(windows)]
+static ORIGINAL_INPUT_CP: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// RAII Guard that manages crossterm raw mode, alternate screen, and mouse capture.
 /// Ensures the terminal is 100% restored upon normal exit, error return, or panic.
@@ -37,6 +41,7 @@ impl TerminalGuard {
         // 2. Check if running in a real interactive terminal
         let is_tty = out.is_terminal();
         if is_tty {
+            Self::setup_utf8_console();
             Self::maximize_window();
             enable_raw_mode().map_err(AppError::Io)?;
             execute!(out, EnterAlternateScreen, EnableMouseCapture, Hide).map_err(AppError::Io)?;
@@ -72,6 +77,23 @@ impl TerminalGuard {
             let _ = disable_raw_mode();
             let _ = execute!(out, LeaveAlternateScreen, DisableMouseCapture, Show);
             let _ = out.flush();
+
+            #[cfg(windows)]
+            unsafe {
+                #[link(name = "kernel32")]
+                extern "system" {
+                    fn SetConsoleOutputCP(wCodePageID: u32) -> i32;
+                    fn SetConsoleCP(wCodePageID: u32) -> i32;
+                }
+                let orig_out = ORIGINAL_OUTPUT_CP.swap(0, Ordering::SeqCst);
+                let orig_in = ORIGINAL_INPUT_CP.swap(0, Ordering::SeqCst);
+                if orig_out != 0 {
+                    let _ = SetConsoleOutputCP(orig_out);
+                }
+                if orig_in != 0 {
+                    let _ = SetConsoleCP(orig_in);
+                }
+            }
         }
     }
 
@@ -88,6 +110,33 @@ impl TerminalGuard {
     pub fn is_raw(&self) -> bool {
         self.is_raw
     }
+
+    /// Configure console output and input code pages to UTF-8 (65001) on Windows,
+    /// recording the initial code page so it can be restored on exit.
+    #[cfg(windows)]
+    pub fn setup_utf8_console() {
+        unsafe {
+            #[link(name = "kernel32")]
+            extern "system" {
+                fn GetConsoleOutputCP() -> u32;
+                fn GetConsoleCP() -> u32;
+                fn SetConsoleOutputCP(wCodePageID: u32) -> i32;
+                fn SetConsoleCP(wCodePageID: u32) -> i32;
+            }
+            let out_cp = GetConsoleOutputCP();
+            let in_cp = GetConsoleCP();
+            let _ =
+                ORIGINAL_OUTPUT_CP.compare_exchange(0, out_cp, Ordering::SeqCst, Ordering::SeqCst);
+            let _ =
+                ORIGINAL_INPUT_CP.compare_exchange(0, in_cp, Ordering::SeqCst, Ordering::SeqCst);
+            let _ = SetConsoleOutputCP(65001);
+            let _ = SetConsoleCP(65001);
+        }
+    }
+
+    /// No-op on non-Windows platforms.
+    #[cfg(not(windows))]
+    pub fn setup_utf8_console() {}
 
     /// Automatically maximize console window on Windows without entering borderless fullscreen.
     #[cfg(windows)]

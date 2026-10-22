@@ -2,7 +2,7 @@
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::widgets::{Block, BorderType, Borders};
+use ratatui::widgets::{Block, Borders};
 
 /// Unique identifier for interactive application panes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -135,6 +135,41 @@ impl AppLayout {
         }
     }
 
+    /// Return styled Block border depending on focus state, utilizing glyph set for clean icons and borders.
+    pub fn block_for_with_glyphs(
+        &self,
+        pane: PaneId,
+        focused_pane: PaneId,
+        title: &str,
+        glyphs: &crate::tui::glyphs::GlyphSet,
+    ) -> Block<'static> {
+        let is_focused = pane == focused_pane;
+        let border_set = glyphs.border_set(is_focused);
+        let title_str = if is_focused {
+            format!(" {} {} {} ", glyphs.step_arrow(), title, glyphs.step_left())
+        } else {
+            format!(" {} ", title)
+        };
+
+        if is_focused {
+            Block::default()
+                .borders(Borders::ALL)
+                .border_set(border_set)
+                .border_style(
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )
+                .title(title_str)
+        } else {
+            Block::default()
+                .borders(Borders::ALL)
+                .border_set(border_set)
+                .border_style(Style::default().fg(Color::DarkGray))
+                .title(title_str)
+        }
+    }
+
     /// Return styled Block border depending on focus state.
     pub fn block_for(
         &self,
@@ -142,24 +177,12 @@ impl AppLayout {
         focused_pane: PaneId,
         title: &'static str,
     ) -> Block<'static> {
-        let is_focused = pane == focused_pane;
-        if is_focused {
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Thick)
-                .border_style(
-                    Style::default()
-                        .fg(Color::Cyan)
-                        .add_modifier(Modifier::BOLD),
-                )
-                .title(format!(" ❯ [ACTIVO] {} ❮ ", title))
-        } else {
-            Block::default()
-                .borders(Borders::ALL)
-                .border_type(BorderType::Rounded)
-                .border_style(Style::default().fg(Color::DarkGray))
-                .title(format!(" {} ", title))
-        }
+        self.block_for_with_glyphs(
+            pane,
+            focused_pane,
+            title,
+            &crate::tui::glyphs::GlyphSet::default(),
+        )
     }
 }
 

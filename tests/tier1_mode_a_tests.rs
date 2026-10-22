@@ -603,7 +603,9 @@ async fn test_flow_export_cancellation_confirmation_dismissal() {
         .contains("¿Desea cancelar la exportación en curso?"));
 
     // Press 'N' -> dismiss confirmation and continue exporting
-    app.handle_flow_key(make_k(KeyCode::Char('n'))).await.unwrap();
+    app.handle_flow_key(make_k(KeyCode::Char('n')))
+        .await
+        .unwrap();
     assert!(app.flow_state.is_active, "Wizard should still be active");
     assert!(
         !app.flow_state.is_confirming_cancel,
@@ -663,7 +665,9 @@ async fn test_flow_export_cancellation_confirmed_and_event_handling() {
     assert!(!cancel_token.is_cancelled());
 
     // Press 'S' -> confirm cancellation
-    app.handle_flow_key(make_k(KeyCode::Char('s'))).await.unwrap();
+    app.handle_flow_key(make_k(KeyCode::Char('s')))
+        .await
+        .unwrap();
     assert!(cancel_token.is_cancelled(), "Token must be cancelled");
     assert!(!app.flow_state.is_confirming_cancel);
     assert!(app.status_message.contains("Deteniendo exportación"));
