@@ -369,7 +369,7 @@ async fn test_panel1_startup_navigation_without_space_and_enter_confirm() {
 }
 
 #[tokio::test]
-async fn test_panel1_up_down_strictly_dedicated_and_prevents_preview_canvas_hijacking() {
+async fn test_panel_focus_isolation_and_tab_navigation() {
     use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
@@ -397,23 +397,38 @@ async fn test_panel1_up_down_strictly_dedicated_and_prevents_preview_canvas_hija
     .unwrap();
     assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
 
-    // 2. Pressing Up or Down immediately refocuses Panel 1 and navigates photos
+    // 2. Pressing Up or Down in PreviewCanvas must NOT hijack focus back to Library
+    app.mode_a.view_mode = ModeAView::VariantMatrix;
+    app.mode_a.variant_count = 6;
+    app.mode_a.focused_variant = 0;
+    let initial_photo_idx = app.selected_index;
+
+    app.handle_key(make_key(KeyCode::Down)).await.unwrap();
+    assert_eq!(
+        app.focused_pane,
+        PaneId::PreviewCanvas,
+        "Focus must remain in PreviewCanvas while operating in variants"
+    );
+    assert_eq!(
+        app.selected_index, initial_photo_idx,
+        "Photo in library must not change when operating in variants"
+    );
+
+    // 3. Tab key returns focus cleanly to Panel 1 (Library)
+    app.handle_key(make_key(KeyCode::Tab)).await.unwrap();
+    assert_eq!(
+        app.focused_pane,
+        PaneId::Library,
+        "Tab key must return focus to Library"
+    );
+
+    // 4. Now that focus is back in Panel 1, Up/Down navigates library photos
     if app.items.len() >= 2 {
         app.handle_key(make_key(KeyCode::Down)).await.unwrap();
-        assert_eq!(
-            app.focused_pane,
-            PaneId::Library,
-            "Down arrow must automatically refocus Panel 1"
-        );
         assert_eq!(app.selected_index, 1);
         assert!(app.items[1].is_selected);
 
         app.handle_key(make_key(KeyCode::Up)).await.unwrap();
-        assert_eq!(
-            app.focused_pane,
-            PaneId::Library,
-            "Up arrow must automatically refocus Panel 1"
-        );
         assert_eq!(app.selected_index, 0);
         assert!(app.items[0].is_selected);
     }

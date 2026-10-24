@@ -601,20 +601,15 @@ impl AppController {
 
     async fn handle_mode_a_key(&mut self, key: KeyEvent) -> Result<(), AppError> {
         match key.code {
-            // Photo library navigation: Up and Down strictly dedicated to Panel 1 (and autofocuses Panel 1)
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.focused_pane = PaneId::Library;
+            // Photo library navigation: strictly isolated to Panel 1
+            KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h')
+                if self.focused_pane == PaneId::Library =>
+            {
                 self.navigate_photo_prev().await?;
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.focused_pane = PaneId::Library;
-                self.navigate_photo_next().await?;
-            }
-            // Left and Right in Panel 1 also navigate photos (backward/forward)
-            KeyCode::Left | KeyCode::Char('h') if self.focused_pane == PaneId::Library => {
-                self.navigate_photo_prev().await?;
-            }
-            KeyCode::Right | KeyCode::Char('l') if self.focused_pane == PaneId::Library => {
+            KeyCode::Down | KeyCode::Right | KeyCode::Char('j') | KeyCode::Char('l')
+                if self.focused_pane == PaneId::Library =>
+            {
                 self.navigate_photo_next().await?;
             }
             KeyCode::Enter if self.focused_pane == PaneId::Library => {
@@ -641,14 +636,14 @@ impl AppController {
                 }
             }
 
-            // Photo horizontal navigation from PreviewCanvas (Hero and SplitView)
-            KeyCode::Left | KeyCode::Char('h')
+            // Photo navigation from PreviewCanvas (Hero and SplitView only)
+            KeyCode::Up | KeyCode::Left | KeyCode::Char('k') | KeyCode::Char('h')
                 if self.focused_pane == PaneId::PreviewCanvas
                     && self.mode_a.view_mode != ModeAView::VariantMatrix =>
             {
                 self.navigate_photo_prev().await?;
             }
-            KeyCode::Right | KeyCode::Char('l')
+            KeyCode::Down | KeyCode::Right | KeyCode::Char('j') | KeyCode::Char('l')
                 if self.focused_pane == PaneId::PreviewCanvas
                     && self.mode_a.view_mode != ModeAView::VariantMatrix =>
             {
@@ -718,6 +713,30 @@ impl AppController {
                     self.mode_a.focused_variant += 1;
                 } else {
                     self.mode_a.focused_variant = 0;
+                }
+            }
+            KeyCode::Up | KeyCode::Char('k')
+                if self.mode_a.view_mode == ModeAView::VariantMatrix
+                    && self.focused_pane == PaneId::PreviewCanvas =>
+            {
+                let cols = match self.mode_a.variant_count {
+                    2 | 4 => 2,
+                    _ => 3,
+                };
+                if self.mode_a.focused_variant >= cols {
+                    self.mode_a.focused_variant -= cols;
+                }
+            }
+            KeyCode::Down | KeyCode::Char('j')
+                if self.mode_a.view_mode == ModeAView::VariantMatrix
+                    && self.focused_pane == PaneId::PreviewCanvas =>
+            {
+                let cols = match self.mode_a.variant_count {
+                    2 | 4 => 2,
+                    _ => 3,
+                };
+                if self.mode_a.focused_variant + cols < self.mode_a.variant_count {
+                    self.mode_a.focused_variant += cols;
                 }
             }
             KeyCode::Enter

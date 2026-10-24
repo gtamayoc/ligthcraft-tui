@@ -419,6 +419,338 @@ async fn test_panel1_left_right_keys_isolated_from_panel2_variants() {
 }
 
 #[tokio::test]
+async fn test_variant_matrix_6_options_arrow_navigation_retains_focus_and_navigates_2d() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use lightcraft_tui::app::AppController;
+    use lightcraft_tui::graphics::protocol::ProtocolOverride;
+    use lightcraft_tui::mcp::client::{McpClient, McpClientConfig};
+    use lightcraft_tui::storage::presets_store::PresetStore;
+    use lightcraft_tui::tui::layout::PaneId;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
+
+    let make_key = |code: KeyCode| KeyEvent {
+        code,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+
+    // Simulate Tab to focus on PreviewCanvas (Panel 2)
+    app.handle_key(make_key(KeyCode::Tab)).await.unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+
+    // Switch to 6-variant matrix (3 cols x 2 rows)
+    app.mode_a.view_mode = ModeAView::VariantMatrix;
+    app.mode_a.variant_count = 6;
+    app.mode_a.focused_variant = 0;
+    let initial_photo_idx = app.selected_index;
+
+    // 1. Press Down -> In a 3x2 matrix, Down moves by cols (3): 0 -> 3
+    app.handle_key(make_key(KeyCode::Down)).await.unwrap();
+    assert_eq!(
+        app.focused_pane,
+        PaneId::PreviewCanvas,
+        "Focus must remain in PreviewCanvas after pressing Down arrow"
+    );
+    assert_eq!(
+        app.mode_a.focused_variant, 3,
+        "Down arrow in 6-variant grid must move from slot 0 to slot 3"
+    );
+    assert_eq!(
+        app.selected_index, initial_photo_idx,
+        "Photo library selection must NOT change when navigating variants"
+    );
+
+    // 2. Press Right -> 3 -> 4
+    app.handle_key(make_key(KeyCode::Right)).await.unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+    assert_eq!(app.mode_a.focused_variant, 4);
+    assert_eq!(app.selected_index, initial_photo_idx);
+
+    // 3. Press Up -> 4 - 3 cols = 1
+    app.handle_key(make_key(KeyCode::Up)).await.unwrap();
+    assert_eq!(
+        app.focused_pane,
+        PaneId::PreviewCanvas,
+        "Focus must remain in PreviewCanvas after pressing Up arrow"
+    );
+    assert_eq!(
+        app.mode_a.focused_variant, 1,
+        "Up arrow in 6-variant grid must move from slot 4 to slot 1"
+    );
+    assert_eq!(app.selected_index, initial_photo_idx);
+
+    // 4. Press Left -> 1 - 1 = 0
+    app.handle_key(make_key(KeyCode::Left)).await.unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+    assert_eq!(app.mode_a.focused_variant, 0);
+
+    // 5. Boundary check Up at top row -> stays at 0, does NOT jump to Library
+    app.handle_key(make_key(KeyCode::Up)).await.unwrap();
+    assert_eq!(
+        app.focused_pane,
+        PaneId::PreviewCanvas,
+        "Top boundary check: focus must remain in PreviewCanvas"
+    );
+    assert_eq!(app.mode_a.focused_variant, 0);
+    assert_eq!(app.selected_index, initial_photo_idx);
+
+    // 6. Navigate Down to row 1 (0 -> 3) and boundary check Down
+    app.handle_key(make_key(KeyCode::Down)).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 3);
+    app.handle_key(make_key(KeyCode::Down)).await.unwrap();
+    assert_eq!(
+        app.focused_pane,
+        PaneId::PreviewCanvas,
+        "Bottom boundary check: focus must remain in PreviewCanvas"
+    );
+    assert_eq!(
+        app.mode_a.focused_variant, 3,
+        "Bottom boundary check: variant must stay at 3 (3 + 3 >= 6)"
+    );
+    assert_eq!(app.selected_index, initial_photo_idx);
+}
+
+#[tokio::test]
+async fn test_variant_matrix_combined_2d_and_vim_navigation_all_directions() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use lightcraft_tui::app::AppController;
+    use lightcraft_tui::graphics::protocol::ProtocolOverride;
+    use lightcraft_tui::mcp::client::{McpClient, McpClientConfig};
+    use lightcraft_tui::storage::presets_store::PresetStore;
+    use lightcraft_tui::tui::layout::PaneId;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
+
+    let make_k = |code: KeyCode| KeyEvent {
+        code,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+
+    // Focus on PreviewCanvas in 6-variant matrix
+    app.handle_key(make_k(KeyCode::Tab)).await.unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+    app.mode_a.view_mode = ModeAView::VariantMatrix;
+    app.mode_a.variant_count = 6;
+    app.mode_a.focused_variant = 0;
+    let initial_photo = app.selected_index;
+
+    // --- Test Vim keys navigation: h, j, k, l ---
+    // 'j' (Down) moves 0 -> 3
+    app.handle_key(make_k(KeyCode::Char('j'))).await.unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+    assert_eq!(app.mode_a.focused_variant, 3);
+    assert_eq!(app.selected_index, initial_photo);
+
+    // 'l' (Right) moves 3 -> 4
+    app.handle_key(make_k(KeyCode::Char('l'))).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 4);
+
+    // 'l' (Right) moves 4 -> 5
+    app.handle_key(make_k(KeyCode::Char('l'))).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 5);
+
+    // 'k' (Up) moves 5 -> 2
+    app.handle_key(make_k(KeyCode::Char('k'))).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 2);
+
+    // 'h' (Left) moves 2 -> 1
+    app.handle_key(make_k(KeyCode::Char('h'))).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 1);
+
+    // --- Test Mixed arrow and vim keys combined with wrapping ---
+    // 'h' (Left) moves 1 -> 0
+    app.handle_key(make_k(KeyCode::Char('h'))).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 0);
+
+    // Left arrow from 0 wraps to 5 (last slot)
+    app.handle_key(make_k(KeyCode::Left)).await.unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+    assert_eq!(app.mode_a.focused_variant, 5);
+    assert_eq!(app.selected_index, initial_photo);
+
+    // Right arrow from 5 wraps to 0
+    app.handle_key(make_k(KeyCode::Right)).await.unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+    assert_eq!(app.mode_a.focused_variant, 0);
+
+    // --- Boundary checks with Up and Down ---
+    // Top boundary: Up at row 0 (index 0) stays at 0
+    app.handle_key(make_k(KeyCode::Up)).await.unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+    assert_eq!(app.mode_a.focused_variant, 0);
+
+    // Top boundary with 'k'
+    app.handle_key(make_k(KeyCode::Char('k'))).await.unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+    assert_eq!(app.mode_a.focused_variant, 0);
+
+    // Down to row 1 (slot 3)
+    app.handle_key(make_k(KeyCode::Down)).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 3);
+
+    // Bottom boundary: Down at row 1 (index 3) stays at 3
+    app.handle_key(make_k(KeyCode::Down)).await.unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+    assert_eq!(app.mode_a.focused_variant, 3);
+
+    // Bottom boundary with 'j'
+    app.handle_key(make_k(KeyCode::Char('j'))).await.unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+    assert_eq!(app.mode_a.focused_variant, 3);
+
+    // Multi-selection with Space on variant 3
+    app.handle_key(make_k(KeyCode::Char(' '))).await.unwrap();
+    assert!(app.mode_a.variants[3].is_selected);
+
+    // Move to variant 4 and toggle favorite with 'f'
+    app.handle_key(make_k(KeyCode::Right)).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 4);
+    app.handle_key(make_k(KeyCode::Char('f'))).await.unwrap();
+    assert!(app.mode_a.variants[4].is_favorite);
+
+    // --- Test 4-variant matrix (2 cols x 2 rows) ---
+    app.handle_key(make_k(KeyCode::Char('4'))).await.unwrap();
+    assert_eq!(app.mode_a.variant_count, 4);
+    app.mode_a.focused_variant = 0;
+
+    // Down in 2x2 grid moves by cols (2): 0 -> 2
+    app.handle_key(make_k(KeyCode::Down)).await.unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+    assert_eq!(app.mode_a.focused_variant, 2);
+
+    // Right moves 2 -> 3
+    app.handle_key(make_k(KeyCode::Right)).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 3);
+
+    // Up moves 3 -> 1
+    app.handle_key(make_k(KeyCode::Up)).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 1);
+
+    // Up at row 0 clamps at 1
+    app.handle_key(make_k(KeyCode::Up)).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 1);
+
+    // Down at row 1 (from 3) clamps at 3
+    app.handle_key(make_k(KeyCode::Down)).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 3);
+    app.handle_key(make_k(KeyCode::Down)).await.unwrap();
+    assert_eq!(app.mode_a.focused_variant, 3);
+
+    assert_eq!(
+        app.focused_pane, PaneId::PreviewCanvas,
+        "Focus MUST NEVER leave PreviewCanvas during variant operations"
+    );
+    assert_eq!(
+        app.selected_index, initial_photo,
+        "Selected photo MUST NEVER change during variant operations"
+    );
+}
+
+#[tokio::test]
+async fn test_tab_roundtrip_preserves_variant_selection_and_isolated_navigation() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
+    use lightcraft_tui::app::AppController;
+    use lightcraft_tui::graphics::protocol::ProtocolOverride;
+    use lightcraft_tui::mcp::client::{McpClient, McpClientConfig};
+    use lightcraft_tui::storage::presets_store::PresetStore;
+    use lightcraft_tui::tui::layout::PaneId;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
+
+    let make_k = |code: KeyCode| KeyEvent {
+        code,
+        modifiers: KeyModifiers::empty(),
+        kind: KeyEventKind::Press,
+        state: KeyEventState::empty(),
+    };
+
+    // 1. Initial state is Library
+    assert_eq!(app.focused_pane, PaneId::Library);
+    assert_eq!(app.selected_index, 0);
+
+    // 2. Press Enter to confirm photo and enter Step 2 (Variants) in PreviewCanvas
+    app.handle_key(make_k(KeyCode::Enter)).await.unwrap();
+    assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
+    assert_eq!(app.mode_a.view_mode, ModeAView::VariantMatrix);
+
+    // Switch to 6 variants and select variant 4
+    app.mode_a.variant_count = 6;
+    app.handle_key(make_k(KeyCode::Down)).await.unwrap(); // 0 -> 3
+    app.handle_key(make_k(KeyCode::Right)).await.unwrap(); // 3 -> 4
+    assert_eq!(app.mode_a.focused_variant, 4);
+    app.handle_key(make_k(KeyCode::Char(' '))).await.unwrap(); // Select variant 4
+    assert!(app.mode_a.variants[4].is_selected);
+
+    // 3. Press Tab to switch back to Panel 1 (Library)
+    app.handle_key(make_k(KeyCode::Tab)).await.unwrap();
+    assert_eq!(
+        app.focused_pane,
+        PaneId::Library,
+        "Tab must cleanly return focus to Library"
+    );
+
+    // 4. In Library, arrow keys navigate photo list
+    if app.items.len() >= 2 {
+        app.handle_key(make_k(KeyCode::Down)).await.unwrap();
+        assert_eq!(app.selected_index, 1);
+        assert_eq!(app.focused_pane, PaneId::Library);
+    }
+
+    // 5. Press Tab again to return to Panel 2 (PreviewCanvas)
+    app.handle_key(make_k(KeyCode::Tab)).await.unwrap();
+    assert_eq!(
+        app.focused_pane,
+        PaneId::PreviewCanvas,
+        "Tab must return focus to PreviewCanvas"
+    );
+
+    // Variant 2D navigation works immediately without losing focus
+    app.handle_key(make_k(KeyCode::Up)).await.unwrap();
+    assert_eq!(
+        app.focused_pane,
+        PaneId::PreviewCanvas,
+        "Focus must remain in PreviewCanvas"
+    );
+}
+
+#[tokio::test]
 async fn test_variant_export_prompt_and_cancellation() {
     use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyEventState, KeyModifiers};
     use lightcraft_tui::app::AppController;
