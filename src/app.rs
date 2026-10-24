@@ -121,7 +121,6 @@ impl AppController {
         let mut mode_a = ModeAState::default();
 
         if let Some(first) = items.first_mut() {
-            first.is_selected = true;
             mode_a.metadata = read_native_metadata(&first.path);
             mode_a.active_photo = Some(crate::mcp::tools::PhotoInfo {
                 id: 1,
@@ -613,8 +612,10 @@ impl AppController {
                 self.navigate_photo_next().await?;
             }
             KeyCode::Enter if self.focused_pane == PaneId::Library => {
-                if let Some(cur) = self.items.get_mut(self.selected_index) {
-                    cur.is_selected = true;
+                if !self.items.iter().any(|i| i.is_selected) {
+                    if let Some(cur) = self.items.get_mut(self.selected_index) {
+                        cur.is_selected = true;
+                    }
                 }
                 self.focused_pane = PaneId::PreviewCanvas;
                 self.mode_a.view_mode = ModeAView::VariantMatrix;
@@ -633,6 +634,27 @@ impl AppController {
                             format!("deseleccionada {}", self.glyph_set.check_box_unchecked())
                         }
                     );
+                }
+            }
+            KeyCode::Char('a') | KeyCode::Char('A') if self.focused_pane == PaneId::Library => {
+                if !self.items.is_empty() {
+                    let all_selected = self.items.iter().all(|i| i.is_selected);
+                    for item in &mut self.items {
+                        item.is_selected = !all_selected;
+                    }
+                    let count = self.items.iter().filter(|i| i.is_selected).count();
+                    self.status_message = if !all_selected {
+                        format!(
+                            "Todas las fotos seleccionadas ({}) {}",
+                            count,
+                            self.glyph_set.check_box_checked()
+                        )
+                    } else {
+                        format!(
+                            "Selección de fotos limpiada {}",
+                            self.glyph_set.check_box_unchecked()
+                        )
+                    };
                 }
             }
 
@@ -991,22 +1013,28 @@ impl AppController {
         }
     }
 
+    /// Return indices of all selected library items, or fallback to `selected_index` if none is selected.
+    pub fn get_selected_or_focused_photo_indices(&self) -> Vec<usize> {
+        let selected: Vec<usize> = self
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| item.is_selected)
+            .map(|(idx, _)| idx)
+            .collect();
+        if selected.is_empty() && !self.items.is_empty() {
+            vec![self.selected_index.min(self.items.len() - 1)]
+        } else {
+            selected
+        }
+    }
+
     async fn navigate_photo_prev(&mut self) -> Result<(), AppError> {
         if !self.items.is_empty() {
-            let old_idx = self.selected_index;
-            let multi_selected = self.items.iter().filter(|i| i.is_selected).count() > 1;
             if self.selected_index > 0 {
                 self.selected_index -= 1;
             } else {
                 self.selected_index = self.items.len() - 1;
-            }
-            if !multi_selected {
-                if let Some(old) = self.items.get_mut(old_idx) {
-                    old.is_selected = false;
-                }
-                if let Some(cur) = self.items.get_mut(self.selected_index) {
-                    cur.is_selected = true;
-                }
             }
             self.sync_selected_photo().await?;
         }
@@ -1015,20 +1043,10 @@ impl AppController {
 
     async fn navigate_photo_next(&mut self) -> Result<(), AppError> {
         if !self.items.is_empty() {
-            let old_idx = self.selected_index;
-            let multi_selected = self.items.iter().filter(|i| i.is_selected).count() > 1;
             if self.selected_index < self.items.len() - 1 {
                 self.selected_index += 1;
             } else {
                 self.selected_index = 0;
-            }
-            if !multi_selected {
-                if let Some(old) = self.items.get_mut(old_idx) {
-                    old.is_selected = false;
-                }
-                if let Some(cur) = self.items.get_mut(self.selected_index) {
-                    cur.is_selected = true;
-                }
             }
             self.sync_selected_photo().await?;
         }
@@ -1163,14 +1181,13 @@ impl AppController {
 
     /// Execute batch export using the configured InteractiveFlowState matrix (US-006 & US-007).
     pub async fn execute_flow_export_batch(&mut self) -> Result<(), AppError> {
-        let Some(item) = self.items.get(self.selected_index) else {
+        let target_photos = self.get_selected_or_focused_photo_indices();
+        if target_photos.is_empty() {
             self.status_message = "No hay foto seleccionada para exportar".into();
             self.flow_state.close();
             return Ok(());
-        };
+        }
 
-        let source_path = item.path.clone();
-        let file_name = item.filename.clone();
         let target_variants = if self.flow_state.selected_variants.is_empty() {
             self.mode_a.get_selected_or_focused_indices()
         } else {
@@ -1190,7 +1207,10 @@ impl AppController {
         let output_dir = PathBuf::from("export").join("interactive");
         let pipeline = crate::export::ExportPipeline::new();
 
-        let total_jobs = target_variants.len() * target_ratios.len() * target_formats.len();
+        let total_jobs = target_photos.len()
+            * target_variants.len()
+            * target_ratios.len()
+            * target_formats.len();
         self.flow_state.step = WizardStep::Exporting;
         self.flow_state.set_export_progress(
             0,
@@ -1199,64 +1219,86 @@ impl AppController {
             0.0,
         );
 
+        let photos_label = if target_photos.len() == 1 {
+            self.items
+                .get(target_photos[0])
+                .map(|i| i.filename.clone())
+                .unwrap_or_else(|| "1 foto".into())
+        } else {
+            format!("{} fotos", target_photos.len())
+        };
+
         self.status_message = format!(
             "Exportando matriz en segundo plano: {} archivo(s) para {}...",
-            total_jobs, file_name
+            total_jobs, photos_label
         );
         self.needs_render = true;
 
         let mut jobs = Vec::new();
         let mut job_seq = 1usize;
 
-        for &slot_idx in &target_variants {
-            let (recipe, preset_name) = if let Some(slot) = self.mode_a.variants.get(slot_idx) {
-                (slot.recipe.clone(), slot.recipe.name.clone())
-            } else {
-                (
-                    self.mode_a.active_recipe.clone(),
-                    self.mode_a.active_recipe.name.clone(),
-                )
+        for &photo_idx in &target_photos {
+            let Some(item) = self.items.get(photo_idx) else {
+                continue;
             };
+            let source_path = item.path.clone();
 
-            for &ratio in &target_ratios {
-                for &format in &target_formats {
-                    let aspect_tag = ratio.aspect_label();
-                    let variant_tag = format!(
-                        "var{}_{}__{}",
-                        slot_idx + 1,
-                        preset_name.replace(' ', "_"),
-                        aspect_tag
-                    );
+            for &slot_idx in &target_variants {
+                let (recipe, preset_name) = if let Some(slot) = self.mode_a.variants.get(slot_idx) {
+                    (slot.recipe.clone(), slot.recipe.name.clone())
+                } else {
+                    (
+                        self.mode_a.active_recipe.clone(),
+                        self.mode_a.active_recipe.name.clone(),
+                    )
+                };
 
-                    let (bit_depth, quality) = match format {
-                        crate::export::OutputFormat::Tiff => {
-                            (crate::export::BitDepth::Sixteen, 100)
-                        }
-                        crate::export::OutputFormat::Png => (crate::export::BitDepth::Eight, 100),
-                        crate::export::OutputFormat::Jpeg => (crate::export::BitDepth::Eight, 95),
-                    };
+                for &ratio in &target_ratios {
+                    for &format in &target_formats {
+                        let aspect_tag = ratio.aspect_label();
+                        let variant_tag = format!(
+                            "var{}_{}__{}",
+                            slot_idx + 1,
+                            preset_name.replace(' ', "_"),
+                            aspect_tag
+                        );
 
-                    let job = crate::export::ExportJob {
-                        job_id: job_seq as u64,
-                        source_path: source_path.clone(),
-                        photo_id: None,
-                        recipe_name: variant_tag.clone(),
-                        recipe: recipe.clone(),
-                        profile: crate::export::ExportProfile {
-                            name: format!("{}_{:?}", variant_tag, format),
-                            format,
-                            quality,
-                            bit_depth,
-                            scaling: crate::export::ScalingProfile::AspectCrop { ratio },
-                            ..Default::default()
-                        },
-                        output_dir: output_dir.clone(),
-                        template: crate::export::NamingTemplate::parse("{name}__{preset}.{ext}"),
-                        seq_number: job_seq,
-                        collision_policy: crate::export::CollisionPolicy::Overwrite,
-                    };
-                    jobs.push((job, format, ratio, variant_tag));
-                    job_seq += 1;
+                        let (bit_depth, quality) = match format {
+                            crate::export::OutputFormat::Tiff => {
+                                (crate::export::BitDepth::Sixteen, 100)
+                            }
+                            crate::export::OutputFormat::Png => {
+                                (crate::export::BitDepth::Eight, 100)
+                            }
+                            crate::export::OutputFormat::Jpeg => {
+                                (crate::export::BitDepth::Eight, 95)
+                            }
+                        };
+
+                        let job = crate::export::ExportJob {
+                            job_id: job_seq as u64,
+                            source_path: source_path.clone(),
+                            photo_id: None,
+                            recipe_name: variant_tag.clone(),
+                            recipe: recipe.clone(),
+                            profile: crate::export::ExportProfile {
+                                name: format!("{}_{:?}", variant_tag, format),
+                                format,
+                                quality,
+                                bit_depth,
+                                scaling: crate::export::ScalingProfile::AspectCrop { ratio },
+                                ..Default::default()
+                            },
+                            output_dir: output_dir.clone(),
+                            template: crate::export::NamingTemplate::parse(
+                                "{name}__{preset}.{ext}",
+                            ),
+                            seq_number: job_seq,
+                            collision_policy: crate::export::CollisionPolicy::Overwrite,
+                        };
+                        jobs.push((job, format, ratio, variant_tag));
+                        job_seq += 1;
+                    }
                 }
             }
         }
@@ -1941,7 +1983,7 @@ impl AppController {
                 )
             }
             WizardStep::Summary => {
-                let photos = 1;
+                let photos = self.get_selected_or_focused_photo_indices().len().max(1);
                 let variants = self.flow_state.selected_variants.len().max(1);
                 let ratios = self.flow_state.selected_ratios.len().max(1);
                 let formats = self.flow_state.selected_formats.len().max(1);

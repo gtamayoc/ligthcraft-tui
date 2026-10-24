@@ -328,6 +328,8 @@ async fn test_aspect_ratio_geometric_center_crops() {
 
 #[tokio::test]
 async fn test_panel1_startup_navigation_without_space_and_enter_confirm() {
+    use lightcraft_tui::app::LibraryItem;
+
     let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
     let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
     let mut app = AppController::new(
@@ -339,33 +341,138 @@ async fn test_panel1_startup_navigation_without_space_and_enter_confirm() {
     .await
     .unwrap();
 
-    // 1. Panel 1 is focused at startup, initial photo is auto-selected
+    if app.items.len() < 3 {
+        app.items = vec![
+            LibraryItem {
+                filename: "IMG_0001.CR3".into(),
+                path: PathBuf::from("IMG_0001.CR3"),
+                is_cr3: true,
+                size_bytes: 1024,
+                is_selected: false,
+                rating: 0,
+                is_picked: false,
+                is_rejected: false,
+            },
+            LibraryItem {
+                filename: "IMG_0002.CR3".into(),
+                path: PathBuf::from("IMG_0002.CR3"),
+                is_cr3: true,
+                size_bytes: 1024,
+                is_selected: false,
+                rating: 0,
+                is_picked: false,
+                is_rejected: false,
+            },
+            LibraryItem {
+                filename: "IMG_0003.CR3".into(),
+                path: PathBuf::from("IMG_0003.CR3"),
+                is_cr3: true,
+                size_bytes: 1024,
+                is_selected: false,
+                rating: 0,
+                is_picked: false,
+                is_rejected: false,
+            },
+        ];
+    }
+
+    // 1. Panel 1 is focused at startup, cursor is at index 0, checkboxes start unchecked
     assert_eq!(app.focused_pane, PaneId::Library);
     assert_eq!(app.selected_index, 0);
-    if !app.items.is_empty() {
-        assert!(app.items[0].is_selected);
-    }
+    assert!(!app.items[0].is_selected);
 
-    // 2. Immediate arrow navigation Down WITHOUT needing Space
-    if app.items.len() >= 2 {
-        app.handle_key(make_key(KeyCode::Down)).await.unwrap();
-        assert_eq!(app.selected_index, 1);
-        // Automatically selects newly focused photo and deselects previous single selection
-        assert!(!app.items[0].is_selected);
-        assert!(app.items[1].is_selected);
+    // 2. Arrow navigation Down moves cursor WITHOUT moving or toggling [X]
+    app.handle_key(make_key(KeyCode::Down)).await.unwrap();
+    assert_eq!(app.selected_index, 1);
+    assert!(!app.items[0].is_selected);
+    assert!(!app.items[1].is_selected);
 
-        // Arrow navigation Up returns to first photo
-        app.handle_key(make_key(KeyCode::Up)).await.unwrap();
-        assert_eq!(app.selected_index, 0);
-        assert!(app.items[0].is_selected);
-        assert!(!app.items[1].is_selected);
-    }
-
-    // 3. Press Enter in Panel 1 confirms photo and advances to Panel 2 (Variants)
+    // 3. Press Enter in Panel 1 when no checkbox was manually marked:
+    // automatically marks the focused photo (index 1) and advances to Panel 2 (Variants)
     app.handle_key(make_key(KeyCode::Enter)).await.unwrap();
+    assert!(app.items[1].is_selected);
+    assert!(!app.items[0].is_selected);
     assert_eq!(app.focused_pane, PaneId::PreviewCanvas);
     assert_eq!(app.mode_a.view_mode, ModeAView::VariantMatrix);
     assert!(app.status_message.contains("Paso 1 confirmado"));
+}
+
+#[tokio::test]
+async fn test_panel1_library_multi_photo_selection_and_arrow_isolation() {
+    use lightcraft_tui::app::LibraryItem;
+
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
+
+    app.items = vec![
+        LibraryItem {
+            filename: "IMG_0001.CR3".into(),
+            path: PathBuf::from("IMG_0001.CR3"),
+            is_cr3: true,
+            size_bytes: 1024,
+            is_selected: false,
+            rating: 0,
+            is_picked: false,
+            is_rejected: false,
+        },
+        LibraryItem {
+            filename: "IMG_0002.CR3".into(),
+            path: PathBuf::from("IMG_0002.CR3"),
+            is_cr3: true,
+            size_bytes: 1024,
+            is_selected: false,
+            rating: 0,
+            is_picked: false,
+            is_rejected: false,
+        },
+        LibraryItem {
+            filename: "IMG_0003.CR3".into(),
+            path: PathBuf::from("IMG_0003.CR3"),
+            is_cr3: true,
+            size_bytes: 1024,
+            is_selected: false,
+            rating: 0,
+            is_picked: false,
+            is_rejected: false,
+        },
+    ];
+
+    // 1. Press Space on photo 0 -> marks photo 0 with [X]
+    app.handle_key(make_key(KeyCode::Char(' '))).await.unwrap();
+    assert!(app.items[0].is_selected);
+    assert!(!app.items[1].is_selected);
+
+    // 2. Press Down arrow -> cursor moves to photo 1, photo 0 MUST keep [X] and photo 1 MUST stay [ ]
+    app.handle_key(make_key(KeyCode::Down)).await.unwrap();
+    assert_eq!(app.selected_index, 1);
+    assert!(
+        app.items[0].is_selected,
+        "Photo 0 must stay selected when pressing Down arrow"
+    );
+    assert!(
+        !app.items[1].is_selected,
+        "Photo 1 must NOT auto-select on Down arrow without Space"
+    );
+
+    // 3. Press Space on photo 1 -> now BOTH photo 0 and photo 1 are selected [X]
+    app.handle_key(make_key(KeyCode::Char(' '))).await.unwrap();
+    assert!(app.items[0].is_selected);
+    assert!(app.items[1].is_selected);
+    assert!(!app.items[2].is_selected);
+
+    // 4. Press Down arrow to photo 2 and press Enter -> preserves [0, 1] without selecting photo 2
+    app.handle_key(make_key(KeyCode::Down)).await.unwrap();
+    assert_eq!(app.selected_index, 2);
+    app.handle_key(make_key(KeyCode::Enter)).await.unwrap();
+    assert_eq!(app.get_selected_or_focused_photo_indices(), vec![0, 1]);
 }
 
 #[tokio::test]
@@ -422,15 +529,13 @@ async fn test_panel_focus_isolation_and_tab_navigation() {
         "Tab key must return focus to Library"
     );
 
-    // 4. Now that focus is back in Panel 1, Up/Down navigates library photos
+    // 4. Now that focus is back in Panel 1, Up/Down navigates library photos without moving [X]
     if app.items.len() >= 2 {
         app.handle_key(make_key(KeyCode::Down)).await.unwrap();
         assert_eq!(app.selected_index, 1);
-        assert!(app.items[1].is_selected);
 
         app.handle_key(make_key(KeyCode::Up)).await.unwrap();
         assert_eq!(app.selected_index, 0);
-        assert!(app.items[0].is_selected);
     }
 }
 
