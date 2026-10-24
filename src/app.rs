@@ -1446,27 +1446,24 @@ impl AppController {
                     self.flow_state.toggle_focused_format();
                 }
                 // Direct numeric hotkeys
-                KeyCode::Char('1') => {
-                    self.flow_state.selected_formats = vec![crate::export::OutputFormat::Tiff];
-                }
-                KeyCode::Char('2') => {
-                    self.flow_state.selected_formats = vec![crate::export::OutputFormat::Jpeg];
-                }
-                KeyCode::Char('3') => {
-                    self.flow_state.selected_formats = vec![crate::export::OutputFormat::Png];
-                }
-                KeyCode::Char('4') => {
-                    self.flow_state.selected_formats = vec![
-                        crate::export::OutputFormat::Tiff,
-                        crate::export::OutputFormat::Jpeg,
-                    ];
-                }
-                KeyCode::Char('5') => {
-                    self.flow_state.selected_formats = vec![
-                        crate::export::OutputFormat::Tiff,
-                        crate::export::OutputFormat::Jpeg,
-                        crate::export::OutputFormat::Png,
-                    ];
+                KeyCode::Char('1') => self
+                    .flow_state
+                    .toggle_format(crate::export::OutputFormat::Tiff),
+                KeyCode::Char('2') => self
+                    .flow_state
+                    .toggle_format(crate::export::OutputFormat::Jpeg),
+                KeyCode::Char('3') => self
+                    .flow_state
+                    .toggle_format(crate::export::OutputFormat::Png),
+                KeyCode::Char('a') | KeyCode::Char('A') => {
+                    if self.flow_state.selected_formats.len()
+                        == crate::export::OutputFormat::ALL.len()
+                    {
+                        self.flow_state.selected_formats = vec![crate::export::OutputFormat::Tiff];
+                    } else {
+                        self.flow_state.selected_formats =
+                            crate::export::OutputFormat::ALL.to_vec();
+                    }
                 }
                 // Enter confirms and continues
                 KeyCode::Enter => {
@@ -1475,6 +1472,9 @@ impl AppController {
                     }
                     if !self.flow_state.selected_formats.is_empty() {
                         self.flow_state.step = WizardStep::Summary;
+                    } else {
+                        self.status_message =
+                            "Selecciona al menos un formato antes de continuar".into();
                     }
                 }
                 // Backward navigation
@@ -1869,45 +1869,23 @@ impl AppController {
                 )
             }
             WizardStep::FileFormats => {
-                let format_items = [
-                    (
-                        "1",
-                        "Solo TIFF (16-bit)",
-                        self.flow_state.selected_formats == vec![crate::export::OutputFormat::Tiff],
-                    ),
-                    (
-                        "2",
-                        "Solo JPEG (Web)",
-                        self.flow_state.selected_formats == vec![crate::export::OutputFormat::Jpeg],
-                    ),
-                    (
-                        "3",
-                        "Solo PNG",
-                        self.flow_state.selected_formats == vec![crate::export::OutputFormat::Png],
-                    ),
-                    (
-                        "4",
-                        "TIFF + JPEG",
-                        self.flow_state.selected_formats.contains(&crate::export::OutputFormat::Tiff)
-                            && self.flow_state.selected_formats.contains(&crate::export::OutputFormat::Jpeg)
-                            && self.flow_state.selected_formats.len() == 2,
-                    ),
-                    (
-                        "5",
-                        "Todos (TIFF+JPEG+PNG)",
-                        self.flow_state.selected_formats.len() == 3,
-                    ),
+                let format_items: [(crate::export::OutputFormat, &str, &str); 3] = [
+                    (crate::export::OutputFormat::Tiff, "1", "TIFF (16-bit)"),
+                    (crate::export::OutputFormat::Jpeg, "2", "JPEG (Web)"),
+                    (crate::export::OutputFormat::Png, "3", "PNG"),
                 ];
 
                 let mut spans = Vec::new();
-                for (idx, (key_num, label, is_sel)) in format_items.iter().enumerate() {
+                for (idx, (format, key_num, label)) in format_items.iter().enumerate() {
+                    let is_sel = self.flow_state.selected_formats.contains(format);
                     let is_foc = idx == self.flow_state.focused_format_idx;
+
                     let prefix = if is_foc { format!("{} ", self.glyph_set.triangle_right()) } else { "  ".to_string() };
                     let suffix = if is_foc { format!(" {}", self.glyph_set.triangle_left()) } else { "  ".to_string() };
-                    let mark = if *is_sel { self.glyph_set.check_box_checked() } else { self.glyph_set.check_box_unchecked() };
+                    let mark = if is_sel { self.glyph_set.check_box_checked() } else { self.glyph_set.check_box_unchecked() };
                     let item_text = format!("{}{}[{}] {}{}", prefix, mark, key_num, label, suffix);
 
-                    let style = if *is_sel {
+                    let style = if is_sel {
                         // Azul claro al estar seleccionado
                         let mut st = Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD);
                         if is_foc {
@@ -1927,11 +1905,33 @@ impl AppController {
                     spans.push(Span::raw(" "));
                 }
 
+                // Opción 4: Todos
+                let all_sel = self.flow_state.selected_formats.len() == crate::export::OutputFormat::ALL.len();
+                let all_foc = self.flow_state.focused_format_idx == 3;
+                let all_prefix = if all_foc { format!("{} ", self.glyph_set.triangle_right()) } else { "  ".to_string() };
+                let all_suffix = if all_foc { format!(" {}", self.glyph_set.triangle_left()) } else { "  ".to_string() };
+                let all_mark = if all_sel { self.glyph_set.check_box_checked() } else { self.glyph_set.check_box_unchecked() };
+                let all_text = format!("{}{}[A] Todos{}", all_prefix, all_mark, all_suffix);
+                let all_style = if all_sel {
+                    let mut st = Style::default().fg(Color::LightCyan).add_modifier(Modifier::BOLD);
+                    if all_foc {
+                        st = st.bg(Color::Rgb(20, 50, 80));
+                    }
+                    st
+                } else {
+                    let mut st = Style::default().fg(Color::White);
+                    if all_foc {
+                        st = st.bg(Color::Rgb(50, 50, 50)).add_modifier(Modifier::BOLD);
+                    }
+                    st
+                };
+                spans.push(Span::styled(all_text, all_style));
+
                 (
                     Line::from(spans),
                     Line::from(vec![Span::styled(
                         format!(
-                            " [{}] Moverse | [Espacio] Seleccionar formato {} | [Enter] Continuar al Resumen {} | [1..5] Atajo | [B] Proporciones | [Esc] Salir ",
+                            " [{}] Moverse | [Espacio] Seleccionar/Desmarcar {} | [Enter] Continuar al Resumen {} | [1..3/A] Atajo | [B] Proporciones | [Esc] Cancelar ",
                             self.glyph_set.arrow_left_right(),
                             self.glyph_set.check_box_checked(),
                             self.glyph_set.step_arrow()

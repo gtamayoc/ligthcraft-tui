@@ -32,6 +32,9 @@ impl OutputFormat {
             Self::Tiff => "image/tiff",
         }
     }
+
+    /// List of all supported output formats for interactive selection.
+    pub const ALL: [OutputFormat; 3] = [OutputFormat::Tiff, OutputFormat::Jpeg, OutputFormat::Png];
 }
 
 /// Bit depth for encoded image containers.

@@ -90,8 +90,8 @@ async fn test_interactive_wizard_navigation_and_retention() {
     assert_eq!(app.flow_state.step, WizardStep::FileFormats);
 
     // 4. US-004: File Format Selection
-    // Choose format 4: TIFF + JPEG
-    app.handle_key(make_key(KeyCode::Char('4'))).await.unwrap();
+    // Toggle JPEG with key '2' (keeping TIFF active -> TIFF + JPEG)
+    app.handle_key(make_key(KeyCode::Char('2'))).await.unwrap();
     assert_eq!(
         app.flow_state.selected_formats,
         vec![OutputFormat::Tiff, OutputFormat::Jpeg]
@@ -432,4 +432,126 @@ async fn test_panel_focus_isolation_and_tab_navigation() {
         assert_eq!(app.selected_index, 0);
         assert!(app.items[0].is_selected);
     }
+}
+
+#[tokio::test]
+async fn test_step4_format_selection_matches_step3_pattern() {
+    let mcp = Arc::new(McpClient::spawn(McpClientConfig::mock()).await.unwrap());
+    let store = PresetStore::default_store(PresetStore::default_builtins()).unwrap();
+    let mut app = AppController::new(
+        mcp,
+        store,
+        PathBuf::from("DRAW"),
+        ProtocolOverride::Halfblocks,
+    )
+    .await
+    .unwrap();
+
+    app.flow_state.start_with_variants(vec![0]);
+    app.flow_state.step = WizardStep::FileFormats;
+
+    // Initial state: default is TIFF selected
+    assert_eq!(app.flow_state.selected_formats, vec![OutputFormat::Tiff]);
+
+    // Press '2' (JPEG) should toggle JPEG on without deselecting TIFF
+    app.handle_key(make_key(KeyCode::Char('2'))).await.unwrap();
+    assert!(
+        app.flow_state
+            .selected_formats
+            .contains(&OutputFormat::Tiff),
+        "TIFF must remain selected when toggling JPEG"
+    );
+    assert!(
+        app.flow_state
+            .selected_formats
+            .contains(&OutputFormat::Jpeg),
+        "JPEG must be selected"
+    );
+
+    // Toggle TIFF off with '1'
+    app.handle_key(make_key(KeyCode::Char('1'))).await.unwrap();
+    assert!(
+        !app.flow_state
+            .selected_formats
+            .contains(&OutputFormat::Tiff),
+        "TIFF should be toggled off"
+    );
+    assert!(
+        app.flow_state
+            .selected_formats
+            .contains(&OutputFormat::Jpeg),
+        "JPEG must remain selected"
+    );
+
+    // Toggle PNG with '3'
+    app.handle_key(make_key(KeyCode::Char('3'))).await.unwrap();
+    assert!(
+        app.flow_state.selected_formats.contains(&OutputFormat::Png),
+        "PNG should be selected"
+    );
+
+    // Toggle 'a' / 'A' for all formats
+    app.handle_key(make_key(KeyCode::Char('a'))).await.unwrap();
+    assert_eq!(app.flow_state.selected_formats.len(), 3);
+
+    // Toggle 'a' again reverts to default [Tiff]
+    app.handle_key(make_key(KeyCode::Char('a'))).await.unwrap();
+    assert_eq!(app.flow_state.selected_formats, vec![OutputFormat::Tiff]);
+
+    // Arrow navigation wrapping: Left wraps 0 -> 3 (Todos)
+    assert_eq!(app.flow_state.focused_format_idx, 0);
+    app.handle_key(make_key(KeyCode::Left)).await.unwrap();
+    assert_eq!(app.flow_state.focused_format_idx, 3);
+
+    // Space on Todos toggles all formats
+    app.handle_key(make_key(KeyCode::Char(' '))).await.unwrap();
+    assert_eq!(app.flow_state.selected_formats.len(), 3);
+
+    // Right wraps 3 -> 0 (TIFF)
+    app.handle_key(make_key(KeyCode::Right)).await.unwrap();
+    assert_eq!(app.flow_state.focused_format_idx, 0);
+
+    // Verify buffer rendering with custom combo (TIFF + PNG):
+    // Deselect JPEG so we have [Tiff, Png]
+    app.handle_key(make_key(KeyCode::Char('2'))).await.unwrap();
+    assert!(app
+        .flow_state
+        .selected_formats
+        .contains(&OutputFormat::Tiff));
+    assert!(!app
+        .flow_state
+        .selected_formats
+        .contains(&OutputFormat::Jpeg));
+    assert!(app.flow_state.selected_formats.contains(&OutputFormat::Png));
+
+    let backend = TestBackend::new(120, 35);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| app.render(f)).unwrap();
+
+    let buffer = terminal.backend().buffer().clone();
+    let mut rendered_text = String::new();
+    for y in 0..buffer.area.height {
+        for x in 0..buffer.area.width {
+            rendered_text.push_str(buffer[(x, y)].symbol());
+        }
+        rendered_text.push('\n');
+    }
+
+    // Both TIFF and PNG must have checked checkboxes, JPEG and Todos must be unchecked
+    assert!(
+        rendered_text.contains("[1] TIFF (16-bit)"),
+        "Buffer should render TIFF"
+    );
+    assert!(
+        rendered_text.contains("[2] JPEG (Web)"),
+        "Buffer should render JPEG"
+    );
+    assert!(
+        rendered_text.contains("[3] PNG"),
+        "Buffer should render PNG"
+    );
+    assert!(
+        rendered_text.contains("[A] Todos"),
+        "Buffer should render Todos"
+    );
 }

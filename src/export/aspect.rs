@@ -279,16 +279,16 @@ impl InteractiveFlowState {
     }
 
     pub fn prev_format(&mut self) {
-        // 5 options: 0=TIFF, 1=JPEG, 2=PNG, 3=TIFF+JPEG, 4=Todos
+        // 4 options: 3 Formats (TIFF, JPEG, PNG) + 1 "Todos"
         if self.focused_format_idx > 0 {
             self.focused_format_idx -= 1;
         } else {
-            self.focused_format_idx = 4;
+            self.focused_format_idx = 3;
         }
     }
 
     pub fn next_format(&mut self) {
-        if self.focused_format_idx < 4 {
+        if self.focused_format_idx < 3 {
             self.focused_format_idx += 1;
         } else {
             self.focused_format_idx = 0;
@@ -301,30 +301,10 @@ impl InteractiveFlowState {
             1 => self.toggle_format(crate::export::OutputFormat::Jpeg),
             2 => self.toggle_format(crate::export::OutputFormat::Png),
             3 => {
-                let has_both = self
-                    .selected_formats
-                    .contains(&crate::export::OutputFormat::Tiff)
-                    && self
-                        .selected_formats
-                        .contains(&crate::export::OutputFormat::Jpeg);
-                if has_both && self.selected_formats.len() == 2 {
+                if self.selected_formats.len() == crate::export::OutputFormat::ALL.len() {
                     self.selected_formats = vec![crate::export::OutputFormat::Tiff];
                 } else {
-                    self.selected_formats = vec![
-                        crate::export::OutputFormat::Tiff,
-                        crate::export::OutputFormat::Jpeg,
-                    ];
-                }
-            }
-            4 => {
-                if self.selected_formats.len() == 3 {
-                    self.selected_formats = vec![crate::export::OutputFormat::Tiff];
-                } else {
-                    self.selected_formats = vec![
-                        crate::export::OutputFormat::Tiff,
-                        crate::export::OutputFormat::Jpeg,
-                        crate::export::OutputFormat::Png,
-                    ];
+                    self.selected_formats = crate::export::OutputFormat::ALL.to_vec();
                 }
             }
             _ => {}
