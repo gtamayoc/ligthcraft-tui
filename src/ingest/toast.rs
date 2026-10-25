@@ -92,28 +92,30 @@ $notifier.Show($toast)
 
             let encoded_command = encode_powershell_script(&script);
 
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-            let mut cmd = std::process::Command::new("powershell");
-            cmd.args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-EncodedCommand",
-                &encoded_command,
-            ]);
-            cmd.creation_flags(CREATE_NO_WINDOW);
-
-            let mut child = cmd.spawn().map_err(|e| {
-                tracing::warn!("Failed to spawn PowerShell toast process: {}", e);
-                IngestError::ToastError(format!("Failed to spawn PowerShell toast process: {}", e))
-            })?;
-
-            // Detach wait in background thread to avoid zombie processes
+            let app_id = self.app_id.clone();
             std::thread::spawn(move || {
-                let _ = child.wait();
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+                let mut cmd = std::process::Command::new("powershell");
+                cmd.args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-EncodedCommand",
+                    &encoded_command,
+                ]);
+                cmd.creation_flags(CREATE_NO_WINDOW);
+
+                match cmd.spawn() {
+                    Ok(mut child) => {
+                        let _ = child.wait();
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to spawn PowerShell toast process for {}: {}", app_id, e);
+                    }
+                }
             });
 
             Ok(())

@@ -104,14 +104,14 @@ pub fn clean_field_string(field: &exif::Field) -> Option<String> {
     let cleaned = display
         .trim_matches('"')
         .trim_matches(|c: char| c == '\0' || c.is_control() || c.is_whitespace());
-    if !cleaned.is_empty()
-        && !cleaned.chars().all(|c| c.is_control() || c.is_whitespace())
-        && cleaned != "\\x00"
-        && !(cleaned.starts_with("\\x") && cleaned.len() == 4)
+    if cleaned.is_empty()
+        || cleaned.chars().all(|c| c.is_control() || c.is_whitespace())
+        || cleaned == "\\x00"
+        || (cleaned.starts_with("\\x") && cleaned.len() == 4)
     {
-        Some(cleaned.to_string())
-    } else {
         None
+    } else {
+        Some(cleaned.to_string())
     }
 }
 

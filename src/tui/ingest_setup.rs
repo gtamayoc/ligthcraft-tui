@@ -723,9 +723,9 @@ pub fn render_ingest_setup(frame: &mut Frame, state: &IngestSetupState) {
                     media_summary.total_count(),
                     media_summary.total_media_bytes as f64 / 1_048_576.0
                 )),
-                Line::from(format!(
+                Line::from(
                     "Ruta guardada cargada automáticamente desde camera_registry.toml"
-                )),
+                ),
                 Line::from(""),
                 Line::from(Span::styled(
                     format!(
