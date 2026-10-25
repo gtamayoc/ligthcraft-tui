@@ -5,6 +5,8 @@ pub mod engine;
 pub mod error;
 pub mod export;
 pub mod graphics;
+pub mod hub;
+pub mod ingest;
 pub mod mcp;
 pub mod queue;
 pub mod storage;
@@ -32,8 +34,12 @@ use tui::TerminalGuard;
 )]
 pub struct Cli {
     /// Launch interactive Terminal User Interface (TUI)
-    #[arg(long)]
+    #[arg(long, conflicts_with = "sd_ingest")]
     pub tui: bool,
+
+    /// Launch SD Card Ingest & Storage Analyzer directly (bypasses launcher hub)
+    #[arg(long, conflicts_with = "tui")]
+    pub sd_ingest: bool,
 
     /// Force ASCII glyphs instead of Unicode icons/symbols (env: LC_ASCII=1)
     #[arg(long, env = "LC_ASCII")]
@@ -566,39 +572,12 @@ async fn main() -> ExitCode {
         }
     }
 
-    // Launch TUI mode if explicitly requested, or if interactive terminal and no diagnostic flags
-    if cli.tui || (!had_action && std::io::stdout().is_terminal()) {
-        had_action = true;
-        let draw_dir = cli.draw_dir.clone().unwrap_or_else(find_draw_dir);
-        let store = match cli.presets_dir {
-            Some(ref dir) => PresetStore::with_default_builtins(dir.clone()).unwrap_or_else(|_| {
-                PresetStore::default_store(PresetStore::default_builtins()).unwrap()
-            }),
-            None => PresetStore::default_store(PresetStore::default_builtins()).unwrap(),
-        };
+    // Interactive TUI / Launcher Hub Dispatch
+    let run_interactive =
+        cli.tui || cli.sd_ingest || (!had_action && std::io::stdout().is_terminal());
 
-        let config = if cli.mock {
-            McpClientConfig::mock()
-        } else {
-            let mut cfg = McpClientConfig::default();
-            if cfg.resolve_executable().is_err() {
-                cfg.mode = ClientMode::Mock;
-            }
-            cfg
-        };
-
-        let mcp_client = match McpClient::spawn(config).await {
-            Ok(client) => Arc::new(client),
-            Err(e) => {
-                eprintln!("Failed to launch MCP client: {}", e);
-                return ExitCode::FAILURE;
-            }
-        };
-
-        let graphics_override =
-            ProtocolOverride::from_str_loose(&cli.graphics).unwrap_or(ProtocolOverride::Auto);
-
-        let terminal = match TerminalGuard::init() {
+    if run_interactive {
+        let mut terminal = match TerminalGuard::init() {
             Ok(t) => t,
             Err(e) => {
                 eprintln!("Failed to initialize terminal: {}", e);
@@ -606,21 +585,28 @@ async fn main() -> ExitCode {
             }
         };
 
-        match AppController::new(mcp_client, store, draw_dir, graphics_override).await {
-            Ok(mut app) => {
-                if cli.ascii {
-                    app.glyph_set = tui::GlyphSet::Ascii;
-                }
-                if let Err(e) = app.run(terminal).await {
-                    eprintln!("TUI Application Error: {}", e);
+        // Resolve target tool either via direct CLI flag bypass or interactive Launcher Hub
+        let selected_tool = if cli.tui {
+            hub::ToolOption::Studio
+        } else if cli.sd_ingest {
+            hub::ToolOption::SdIngest
+        } else {
+            match hub::run_launcher(&mut terminal).await {
+                Ok(hub::ToolOption::Exit) => return ExitCode::SUCCESS,
+                Ok(tool) => tool,
+                Err(e) => {
+                    let _ = terminal.restore();
+                    eprintln!("Launcher error: {}", e);
                     return ExitCode::FAILURE;
                 }
             }
-            Err(e) => {
-                eprintln!("Failed to initialize AppController: {}", e);
-                return ExitCode::FAILURE;
-            }
-        }
+        };
+
+        return match selected_tool {
+            hub::ToolOption::Studio => run_studio(&cli, terminal).await,
+            hub::ToolOption::SdIngest => run_sd_ingest(&cli, terminal).await,
+            hub::ToolOption::Exit => ExitCode::SUCCESS,
+        };
     }
 
     if !had_action {
@@ -628,6 +614,7 @@ async fn main() -> ExitCode {
         println!("Use --help for command line options.");
         println!("Available commands:");
         println!("  lightcraft-tui --tui [--graphics <auto|kitty|sixel|halfblocks>] [--mock]");
+        println!("  lightcraft-tui --sd-ingest");
         println!("  lightcraft-tui --sequential-export [--output-dir <dir>]");
         println!("  lightcraft-tui --verify-integrity");
         println!("  lightcraft-tui --production-workload [--output-dir <dir>]");
@@ -637,4 +624,143 @@ async fn main() -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+/// Launches the existing LightCraft Studio RAW developer
+async fn run_studio(cli: &Cli, terminal: TerminalGuard) -> ExitCode {
+    let draw_dir = cli.draw_dir.clone().unwrap_or_else(find_draw_dir);
+    let store = match cli.presets_dir {
+        Some(ref dir) => PresetStore::with_default_builtins(dir.clone()).unwrap_or_else(|_| {
+            PresetStore::default_store(PresetStore::default_builtins()).unwrap()
+        }),
+        None => PresetStore::default_store(PresetStore::default_builtins()).unwrap(),
+    };
+
+    let config = if cli.mock {
+        McpClientConfig::mock()
+    } else {
+        let mut cfg = McpClientConfig::default();
+        if cfg.resolve_executable().is_err() {
+            cfg.mode = ClientMode::Mock;
+        }
+        cfg
+    };
+
+    let mcp_client = match McpClient::spawn(config).await {
+        Ok(client) => Arc::new(client),
+        Err(e) => {
+            eprintln!("Failed to launch MCP client: {}", e);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    let graphics_override =
+        ProtocolOverride::from_str_loose(&cli.graphics).unwrap_or(ProtocolOverride::Auto);
+
+    match AppController::new(mcp_client, store, draw_dir, graphics_override).await {
+        Ok(mut app) => {
+            if cli.ascii {
+                app.glyph_set = tui::GlyphSet::Ascii;
+            }
+            if let Err(e) = app.run(terminal).await {
+                eprintln!("TUI Application Error: {}", e);
+                return ExitCode::FAILURE;
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Failed to initialize AppController: {}", e);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Launches the SD Ingest & Storage Analyzer module (M5 full TUI & automated pipeline)
+async fn run_sd_ingest(_cli: &Cli, mut terminal: TerminalGuard) -> ExitCode {
+    match tui::run_ingest_tui(&mut terminal).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            let _ = terminal.restore();
+            eprintln!("SD Ingest Error: {}", e);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[test]
+    fn test_cli_default_no_args() {
+        let cli = Cli::try_parse_from(["lightcraft-tui"]).unwrap();
+        assert!(!cli.tui);
+        assert!(!cli.sd_ingest);
+        assert!(!cli.verify_integrity);
+        assert!(!cli.check_mcp);
+        assert!(!cli.list_presets);
+        assert!(cli.show_preset.is_none());
+        assert!(!cli.production_workload);
+        assert!(!cli.sequential_export);
+        assert_eq!(cli.graphics, "auto");
+        assert_eq!(cli.format, "toml");
+    }
+
+    #[test]
+    fn test_cli_sd_ingest_flag() {
+        let cli = Cli::try_parse_from(["lightcraft-tui", "--sd-ingest"]).unwrap();
+        assert!(cli.sd_ingest);
+        assert!(!cli.tui);
+    }
+
+    #[test]
+    fn test_cli_tui_flag() {
+        let cli = Cli::try_parse_from(["lightcraft-tui", "--tui"]).unwrap();
+        assert!(cli.tui);
+        assert!(!cli.sd_ingest);
+    }
+
+    #[test]
+    fn test_cli_conflicting_tui_and_sd_ingest() {
+        let res = Cli::try_parse_from(["lightcraft-tui", "--tui", "--sd-ingest"]);
+        assert!(
+            res.is_err(),
+            "Passing both --tui and --sd-ingest must be rejected by clap"
+        );
+    }
+
+    #[test]
+    fn test_cli_conflicting_sd_ingest_and_tui_reverse_order() {
+        let res = Cli::try_parse_from(["lightcraft-tui", "--sd-ingest", "--tui"]);
+        assert!(
+            res.is_err(),
+            "Passing both --sd-ingest and --tui must be rejected by clap"
+        );
+    }
+
+    #[test]
+    fn test_cli_existing_flags_preserved() {
+        let cli = Cli::try_parse_from([
+            "lightcraft-tui",
+            "--verify-integrity",
+            "--sequential-export",
+            "--mock",
+            "--ascii",
+            "--graphics",
+            "kitty",
+            "--format",
+            "json",
+            "--output-dir",
+            "custom/output",
+        ])
+        .unwrap();
+        assert!(cli.verify_integrity);
+        assert!(cli.sequential_export);
+        assert!(cli.mock);
+        assert!(cli.ascii);
+        assert_eq!(cli.graphics, "kitty");
+        assert_eq!(cli.format, "json");
+        assert_eq!(cli.output_dir, PathBuf::from("custom/output"));
+    }
 }

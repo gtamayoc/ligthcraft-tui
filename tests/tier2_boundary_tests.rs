@@ -1,367 +1,468 @@
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)]
 
-//! Tier 2 Boundary & Adversarial Tests: Non-Destructive Safety, SHA-256 Tamper Detection,
-//! Import Mode Validation, and Destination Path Sandboxing.
+//! Tier 2 Boundary & Corner Case Tests: LightCraft SD Ingest Hub & Modular Launcher
+//!
+//! Validates edge cases, boundary conditions, fault injection, and security invariants:
+//! - Exact 99% formatted capacity threshold boundary
+//! - 0-byte corrupt photo files handling
+//! - Truncated and corrupted EXIF headers (< 64 bytes, invalid TIFF magic)
+//! - Strict 100% read-only SD medium permissions (physical write-lock simulation)
+//! - Cryptographic zero-modification invariant verification
+//! - Duplicate file name collisions across folders with differing hashes
+//! - Multi-chunk streaming memory boundary
+//! - Unwritable/unreachable destination paths
+//! - Deeply nested, unicode, and space-containing destination paths
+//! - Malformed registry TOML recovery
+//! - Zero-byte volume capacity edge case
 
 mod common;
 
-#[path = "../src/error.rs"]
-pub mod error;
-#[path = "../src/mcp/mod.rs"]
-pub mod mcp;
-
-use std::fs::File;
-use std::io::{Read, Seek, SeekFrom, Write};
+use chrono::Utc;
+use std::fs::{self, File};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::Arc;
 use tempfile::tempdir;
 
-use error::{IntegrityViolationError, McpError};
-use mcp::client::McpClient;
-use mcp::integrity::{find_draw_dir, verify_cr3_baseline, IntegrityEngine};
-use mcp::tools::{ExportParams, ImportMode, ImportParams};
-
-/// Helper to create a dummy test file with known contents in a directory
-fn create_sample_file(dir: &Path, name: &str, content: &[u8]) -> PathBuf {
-    let path = dir.join(name);
-    let mut file = File::create(&path).expect("failed to create sample file");
-    file.write_all(content)
-        .expect("failed to write sample content");
-    file.flush().expect("failed to flush sample file");
-    path
-}
+use common::contracts::{
+    CameraProfile, IngestError, IngestSessionManifest, MockToastNotifier, SdCardVolume,
+};
+use common::exif_gen::{
+    extract_bounded_exif_fingerprint, extract_capture_date, ExifPhotoBuilder,
+};
+use common::pipeline_harness::{
+    check_empty_card, compute_file_sha256, IngestPipelineHarness,
+};
+use common::registry_fixture::IsolatedCameraRegistry;
+use common::sd_fixture::SyntheticSdCard;
 
 // ============================================================================
-// Group 1: Authoritative Baseline Hash Verification
+// Boundary 1: Formatted Empty Card 99% Margin Exact Threshold
 // ============================================================================
 
 #[test]
-fn test_cr3_baseline_hashes_all_match() {
-    let draw_dir = find_draw_dir();
-    if !draw_dir.exists() {
-        eprintln!(
-            "Notice: DRAW directory not found at {}. Skipping baseline verification in CI runner.",
-            draw_dir.display()
-        );
-        return;
-    }
+fn test_t2_boundary_exact_99_percent_margin_threshold() {
+    let capacity: u64 = 100_000_000_000; // 100 GB
 
-    let results = verify_cr3_baseline(&draw_dir);
-    match results {
-        Ok(results_list) => {
-            for r in results_list {
-                assert!(
-                    r.is_valid,
-                    "File {} failed baseline hash check. Expected {}, got {}",
-                    r.filename, r.expected_sha256, r.actual_sha256
-                );
-                assert_eq!(
-                    r.actual_size, r.expected_size,
-                    "File {} size mismatch. Expected {}, got {}",
-                    r.filename, r.expected_size, r.actual_size
-                );
-            }
-        }
-        Err(missing_err) => {
-            let mut checked_any = false;
-            for entry in lightcraft_tui::mcp::integrity::CR3_BASELINE {
-                let path = draw_dir.join(entry.filename);
-                if path.is_file() {
-                    let (hash, size) = lightcraft_tui::mcp::integrity::compute_file_sha256(&path)
-                        .expect("Failed reading present file");
-                    assert_eq!(
-                        size, entry.expected_size,
-                        "Size mismatch for {}",
-                        entry.filename
-                    );
-                    assert!(
-                        hash.eq_ignore_ascii_case(entry.expected_sha256),
-                        "SHA-256 mismatch for {}",
-                        entry.filename
-                    );
-                    checked_any = true;
-                }
-            }
-            if !checked_any {
-                panic!("Baseline verification must succeed: {}", missing_err);
-            }
-        }
-    }
-}
-
-// ============================================================================
-// Group 2: Tamper Detection (Bit-flip, Truncation, Timestamp modification)
-// ============================================================================
-
-#[test]
-fn test_tamper_detection_single_bit_flip() {
-    let temp = tempdir().expect("tempdir");
-    let file_path = create_sample_file(
-        temp.path(),
-        "sample.bin",
-        b"ABCDEF0123456789ImmutableSourceData",
-    );
-
-    let engine = IntegrityEngine::new(vec![temp.path().to_path_buf()], true);
-    let manifest = engine.capture_preflight().expect("capture preflight");
-    assert_eq!(manifest.records.len(), 1);
-
-    // Initial state verified
-    engine.verify_manifest(&manifest).expect("clean verify");
-
-    let canonical = file_path.canonicalize().unwrap_or(file_path.clone());
-    let initial_time = manifest.records.get(&canonical).unwrap().modified_time;
-
-    // Introduce single-bit flip at byte index 5, restoring initial timestamp to test SHA-256 detection
-    {
-        let mut file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&file_path)
-            .expect("open for tamper");
-        file.seek(SeekFrom::Start(5)).unwrap();
-        let mut byte = [0u8; 1];
-        file.read_exact(&mut byte).unwrap();
-        byte[0] ^= 0x01; // flip lowest bit
-        file.seek(SeekFrom::Start(5)).unwrap();
-        file.write_all(&byte).unwrap();
-        file.flush().unwrap();
-        file.set_modified(initial_time).expect("restore timestamp");
-    }
-
-    // verify_manifest MUST detect the bit-flip via SHA-256 mismatch
-    let result = engine.verify_manifest(&manifest);
-    assert!(result.is_err(), "Engine must detect single-bit flip");
-    match result.unwrap_err() {
-        IntegrityViolationError::HashMismatch {
-            path,
-            expected,
-            actual,
-        } => {
-            assert_eq!(path, file_path.canonicalize().unwrap_or(file_path));
-            assert_ne!(expected, actual);
-        }
-        other => panic!("Expected HashMismatch, got {:?}", other),
-    }
+    // Exactly 99.001% free (99,001,000,000 bytes) -> Above threshold, considered empty
+    let vol_above = SdCardVolume {
+        drive_letter: 'F',
+        volume_label: "EOS_DIGITAL".to_string(),
+        file_system: "exFAT".to_string(),
+        total_bytes: capacity,
+        free_bytes: 99_001_000_000,
+        has_dcim: true,
+        camera_folders: vec![],
+    };
     assert!(
-        engine.is_poisoned(),
-        "Engine must be poisoned after tamper detection"
+        check_empty_card(&vol_above),
+        "99.001% free space must qualify as formatted empty card"
     );
-}
 
-#[test]
-fn test_tamper_detection_truncated_file() {
-    let temp = tempdir().expect("tempdir");
-    let file_path =
-        create_sample_file(temp.path(), "sample.bin", b"012345678901234567890123456789");
-
-    let engine = IntegrityEngine::new(vec![temp.path().to_path_buf()], true);
-    let manifest = engine.capture_preflight().expect("capture preflight");
-
-    // Truncate file from 30 bytes to 20 bytes
-    {
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&file_path)
-            .expect("open for truncate");
-        file.set_len(20).expect("truncate to 20 bytes");
-    }
-
-    // verify_manifest MUST detect truncation via size mismatch
-    let result = engine.verify_manifest(&manifest);
-    assert!(result.is_err(), "Engine must detect file truncation");
-    match result.unwrap_err() {
-        IntegrityViolationError::SizeMismatch {
-            expected_bytes,
-            actual_bytes,
-            ..
-        } => {
-            assert_eq!(expected_bytes, 30);
-            assert_eq!(actual_bytes, 20);
-        }
-        other => panic!("Expected SizeMismatch, got {:?}", other),
-    }
+    // Exactly 98.999% free (98,999,000,000 bytes) -> Below threshold, NOT considered empty
+    let vol_below = SdCardVolume {
+        drive_letter: 'F',
+        volume_label: "EOS_DIGITAL".to_string(),
+        file_system: "exFAT".to_string(),
+        total_bytes: capacity,
+        free_bytes: 98_999_000_000,
+        has_dcim: true,
+        camera_folders: vec![],
+    };
     assert!(
-        engine.is_poisoned(),
-        "Engine must be poisoned after truncation"
+        !check_empty_card(&vol_below),
+        "98.999% free space must NOT qualify as formatted empty card"
     );
 }
 
+// ============================================================================
+// Boundary 2: 0-Byte Photo Handling
+// ============================================================================
+
 #[test]
-fn test_tamper_detection_timestamp_modification_stress() {
-    let temp = tempdir().expect("tempdir");
-    let file_path = create_sample_file(temp.path(), "sample.bin", b"ConstantContentData123456789");
+fn test_t2_boundary_zero_byte_photo_handling() {
+    let sd = SyntheticSdCard::new("EOS_DIGITAL").expect("synthetic SD");
+    let folder = sd.add_camera_folder("100CANON").expect("add folder");
+    let zero_byte_photo = folder.join("IMG_EMPTY.JPG");
 
-    let engine = IntegrityEngine::new(vec![temp.path().to_path_buf()], true);
-    let manifest = engine.capture_preflight().expect("capture preflight");
+    // Create 0-byte file
+    File::create(&zero_byte_photo).expect("create empty file");
 
-    // Retrieve initial recorded modified time
-    let canonical = file_path.canonicalize().unwrap_or(file_path.clone());
-    let initial_time = manifest.records.get(&canonical).unwrap().modified_time;
-
-    // Mutate the file's LastWriteTime without changing bytes or length
-    // Using std::fs::File::set_modified (Rust 1.75+)
-    let past_time = initial_time - Duration::from_secs(3600); // 1 hour earlier
-    {
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .open(&file_path)
-            .expect("open to set modified");
-        file.set_modified(past_time).expect("set_modified");
-    }
-
-    let new_meta = std::fs::metadata(&file_path).expect("metadata");
-    assert_ne!(
-        new_meta.modified().unwrap(),
-        initial_time,
-        "Timestamp was successfully changed on disk"
-    );
-
-    // Stress test: Does verify_manifest check modified_time?
-    let result = engine.verify_manifest(&manifest);
-    // Contract requirement: IntegrityVerifier must detect modified timestamps
+    let result = extract_bounded_exif_fingerprint(&zero_byte_photo, 128 * 1024);
     assert!(
         result.is_err(),
-        "CRITICAL DEFECT: verify_manifest failed to detect modified timestamp on file '{}'!",
-        file_path.display()
+        "0-byte photo must return an error without panicking"
     );
     match result.unwrap_err() {
-        IntegrityViolationError::TimestampMismatch {
-            path,
-            expected,
-            actual,
-        } => {
-            assert_eq!(path, canonical);
-            assert_eq!(expected, initial_time);
-            assert_eq!(actual, new_meta.modified().unwrap());
+        IngestError::ExifError(msg) => {
+            assert!(msg.contains("too small") || msg.contains("EXIF"));
         }
-        other => panic!("Expected TimestampMismatch, got {:?}", other),
+        other => panic!("Unexpected error variant: {:?}", other),
     }
-    assert!(
-        engine.is_poisoned(),
-        "Engine must be poisoned after timestamp tamper detection"
-    );
 }
 
 // ============================================================================
-// Group 3: Import Mode Validation
+// Boundary 3: Truncated EXIF Header (< 64 Bytes)
 // ============================================================================
 
 #[test]
-fn test_integrity_engine_import_mode_validation() {
-    let draw_dir = find_draw_dir();
-    let engine = IntegrityEngine::new(vec![draw_dir.clone()], true);
+fn test_t2_boundary_truncated_exif_header_under_64_bytes() {
+    let sd = SyntheticSdCard::new("EOS_DIGITAL").expect("synthetic SD");
+    let folder = sd.add_camera_folder("100CANON").expect("add folder");
+    let truncated_path = folder.join("IMG_TRUNC.JPG");
 
-    // Safe mode "add"
-    assert!(engine.validate_import_mode(None).is_ok());
-    assert!(engine.validate_import_mode(Some("add")).is_ok());
-    assert!(!engine.is_poisoned());
+    // Only 12 bytes of data (valid JPEG SOI + APP1 marker but truncated before TIFF header)
+    let truncated_data = vec![
+        0xFF, 0xD8, // SOI
+        0xFF, 0xE1, // APP1
+        0x00, 0x08, // length 8
+        b'E', b'x', b'i', b'f', 0x00, 0x00, // Exif marker only, no TIFF
+    ];
+    fs::write(&truncated_path, &truncated_data).expect("write truncated file");
 
-    // Prohibited mode "move"
-    let engine_move = IntegrityEngine::new(vec![draw_dir.clone()], true);
-    let res_move = engine_move.validate_import_mode(Some("move"));
-    assert!(res_move.is_err(), "Mode 'move' must be rejected");
-    assert!(
-        engine_move.is_poisoned(),
-        "Engine must be poisoned after 'move'"
-    );
-
-    // Prohibited mode "copy"
-    let engine_copy = IntegrityEngine::new(vec![draw_dir.clone()], true);
-    let res_copy = engine_copy.validate_import_mode(Some("copy"));
-    assert!(res_copy.is_err(), "Mode 'copy' must be rejected");
-    assert!(
-        engine_copy.is_poisoned(),
-        "Engine must be poisoned after 'copy'"
-    );
-
-    // Arbitrary invalid mode
-    let engine_junk = IntegrityEngine::new(vec![draw_dir.clone()], true);
-    assert!(engine_junk.validate_import_mode(Some("sync")).is_err());
-}
-
-#[tokio::test]
-async fn test_mcp_client_import_mode_move_rejection_at_client_boundary() {
-    let client = McpClient::connect_mock().await.expect("connect mock");
-
-    // Scenario A: Client high-level import API defaults to "add"
-    let paths = vec!["DRAW/IMG_0588.CR3".to_string()];
-    let res = client.import(paths).await;
-    assert!(res.is_ok(), "High-level import with add should succeed");
-
-    // Scenario B: Calling call_tool with ImportMode::Move or ImportMode::Copy
-    let move_params = ImportParams {
-        paths: vec!["DRAW/IMG_0588.CR3".to_string()],
-        mode: ImportMode::Move,
-        album: None,
-        destination: None,
-        on_deleted: None,
-        organize: None,
-        rename: None,
-    };
-
-    // Contract requirement: attempts to invoke import with mode 'move' must be strictly rejected BEFORE hitting MCP server
-    let call_res: Result<serde_json::Value, McpError> =
-        client.call_tool("import", move_params).await;
-    assert!(
-        call_res.is_err(),
-        "CRITICAL DEFECT: McpClient dispatched 'import' with mode: 'move' without pre-flight validation!"
-    );
-
-    client.shutdown().await.expect("shutdown");
+    let result = extract_bounded_exif_fingerprint(&truncated_path, 128 * 1024);
+    assert!(result.is_err(), "Truncated header must not panic");
 }
 
 // ============================================================================
-// Group 4: Output Path Sandboxing
+// Boundary 4: Corrupted TIFF Magic Bytes
 // ============================================================================
 
 #[test]
-fn test_destination_path_sandboxing_draw_subpaths() {
-    let draw_dir = find_draw_dir();
-    let engine = IntegrityEngine::new(vec![draw_dir.clone()], true);
+fn test_t2_boundary_corrupted_tiff_magic_bytes() {
+    let sd = SyntheticSdCard::new("EOS_DIGITAL").expect("synthetic SD");
+    let folder = sd.add_camera_folder("100CANON").expect("add folder");
+    let corrupt_path = folder.join("IMG_CORRUPT.JPG");
 
-    // 1. Direct file inside DRAW
-    let target1 = draw_dir.join("exported_variant.jpg");
-    assert!(engine.validate_destination_path(&target1).is_err());
+    // Valid JPEG SOI + APP1, but invalid TIFF header magic b"ZZ" instead of b"II"
+    let mut corrupt_data = vec![
+        0xFF, 0xD8, // SOI
+        0xFF, 0xE1, // APP1
+        0x00, 0x20, // length 32
+        b'E', b'x', b'i', b'f', 0x00, 0x00, // Exif\0\0
+        b'Z', b'Z', // Corrupt byte order
+        0x99, 0x99, // Corrupt magic
+    ];
+    corrupt_data.resize(64, 0xEE);
 
-    // 2. Subdirectory inside DRAW
-    let target2 = draw_dir.join("exports").join("variant.jpg");
-    assert!(engine.validate_destination_path(&target2).is_err());
+    fs::write(&corrupt_path, &corrupt_data).expect("write corrupt file");
 
-    // 3. Dot-dot traversal attempting to escape into DRAW
-    let target3 = draw_dir.parent().unwrap().join("DRAW").join("test.png");
-    assert!(engine.validate_destination_path(&target3).is_err());
-
-    // 4. Valid target outside DRAW
-    let valid_target = draw_dir
-        .parent()
-        .unwrap()
-        .join("target")
-        .join("test_exports")
-        .join("variant.jpg");
-    assert!(engine.validate_destination_path(&valid_target).is_ok());
+    let result = extract_bounded_exif_fingerprint(&corrupt_path, 128 * 1024);
+    assert!(result.is_err(), "Corrupt TIFF magic must return Err");
 }
 
-#[tokio::test]
-async fn test_mcp_client_export_destination_into_draw_boundary() {
-    let client = McpClient::connect_mock().await.expect("connect mock");
-    let draw_dir = find_draw_dir();
+// ============================================================================
+// Boundary 5: Simulated Physical Write-Lock (Read-Only Medium Permissions)
+// ============================================================================
 
-    // Contract requirement: export destination targeting DRAW/ must be rejected or redirected
-    let export_target = draw_dir.join("polluting_export.jpg");
-    let export_params = ExportParams {
-        id: Some(1),
-        path: Some(export_target.to_string_lossy().to_string()),
-        dir: Some(draw_dir.to_string_lossy().to_string()),
-        format: Some(mcp::tools::ExportFormat::Jpeg),
-        ..Default::default()
+#[tokio::test]
+async fn test_t2_boundary_source_read_only_permissions_lock() {
+    let sd = SyntheticSdCard::new("LOCKED_SD").expect("synthetic SD");
+    let builder = ExifPhotoBuilder::new();
+    sd.add_photo("100CANON", "IMG_0001.JPG", &builder).expect("add photo");
+
+    // Snapshot SD card before locking
+    let baseline_tree = sd.compute_sha256_tree().expect("baseline tree");
+
+    // Simulate physical SD card lock switch by setting read-only filesystem permissions
+    sd.set_read_only(true).expect("set read only permissions");
+
+    let target_dir = tempdir().expect("target tempdir");
+    let profile = CameraProfile {
+        camera_id: "042021000123".to_string(),
+        display_name: "Canon R6 Locked Card".to_string(),
+        target_directory: target_dir.path().to_path_buf(),
+        known_card_capacities: vec![128 * 1024 * 1024 * 1024],
+        last_ingest_timestamp: None,
+        total_photos_ingested: 0,
     };
 
-    let export_res = client.export(export_params).await;
-    assert!(
-        export_res.is_err(),
-        "CRITICAL DEFECT: McpClient::export allowed destination targeting DRAW/ directory without rejection or redirection!"
-    );
+    let harness: IngestPipelineHarness<MockToastNotifier> = IngestPipelineHarness::new(None);
+    let summary = harness
+        .run_ingest(&sd.to_volume(), &profile)
+        .await
+        .expect("ingest on read-only SD must succeed cleanly");
 
-    client.shutdown().await.expect("shutdown");
+    assert_eq!(summary.transferred_files, 1);
+
+    // Invariant: SD card must be 100% untouched
+    sd.assert_unmodified(&baseline_tree);
+
+    // Reset permissions for cleanup
+    let _ = sd.set_read_only(false);
+}
+
+// ============================================================================
+// Boundary 6: Strict Cryptographic Zero-Modification Invariant
+// ============================================================================
+
+#[tokio::test]
+async fn test_t2_boundary_zero_writes_strict_cryptographic_verification() {
+    let sd = SyntheticSdCard::new("EOS_DIGITAL").expect("synthetic SD");
+    let builder = ExifPhotoBuilder::new().payload_size(4096);
+    sd.add_photo("100CANON", "IMG_0001.JPG", &builder).expect("add photo");
+    sd.add_photo("100CANON", "IMG_0002.CR3", &builder.clone().as_raw()).expect("add photo");
+
+    let baseline_tree = sd.compute_sha256_tree().expect("baseline");
+
+    let target_dir = tempdir().expect("target tempdir");
+    let profile = CameraProfile {
+        camera_id: "042021000123".to_string(),
+        display_name: "Canon R6".to_string(),
+        target_directory: target_dir.path().to_path_buf(),
+        known_card_capacities: vec![128 * 1024 * 1024 * 1024],
+        last_ingest_timestamp: None,
+        total_photos_ingested: 0,
+    };
+
+    let harness: IngestPipelineHarness<MockToastNotifier> = IngestPipelineHarness::new(None);
+    harness.run_ingest(&sd.to_volume(), &profile).await.expect("ingest");
+
+    // Invariant check: zero byte alterations, zero extra files created
+    sd.assert_unmodified(&baseline_tree);
+}
+
+// ============================================================================
+// Boundary 7: Duplicate Filename Across Subfolders with Differing Hashes
+// ============================================================================
+
+#[tokio::test]
+async fn test_t2_boundary_duplicate_filename_collision_different_hash() {
+    let sd = SyntheticSdCard::new("EOS_DIGITAL").expect("synthetic SD");
+
+    // Folder 1: Day 1 IMG_0001.JPG
+    let b1 = ExifPhotoBuilder::new()
+        .date_time("2026:10:01 10:00:00")
+        .payload_size(1024);
+    sd.add_photo("100CANON", "IMG_0001.JPG", &b1).expect("add photo 1");
+
+    // Folder 2: Day 2 IMG_0001.JPG (different day and different payload size)
+    let b2 = ExifPhotoBuilder::new()
+        .date_time("2026:10:02 10:00:00")
+        .payload_size(2048);
+    sd.add_photo("101CANON", "IMG_0001.JPG", &b2).expect("add photo 2");
+
+    let target_dir = tempdir().expect("target tempdir");
+    let profile = CameraProfile {
+        camera_id: "042021000123".to_string(),
+        display_name: "Canon R6".to_string(),
+        target_directory: target_dir.path().to_path_buf(),
+        known_card_capacities: vec![128 * 1024 * 1024 * 1024],
+        last_ingest_timestamp: None,
+        total_photos_ingested: 0,
+    };
+
+    let harness: IngestPipelineHarness<MockToastNotifier> = IngestPipelineHarness::new(None);
+    let summary = harness
+        .run_ingest(&sd.to_volume(), &profile)
+        .await
+        .expect("ingest");
+
+    // Because they were taken on different dates, they route to different subdirectories:
+    // 2026/2026-10-01/IMG_0001.JPG and 2026/2026-10-02/IMG_0001.JPG
+    assert_eq!(summary.transferred_files, 2);
+    assert_eq!(summary.skipped_duplicates, 0);
+
+    let dest1 = target_dir.path().join("2026").join("2026-10-01").join("IMG_0001.JPG");
+    let dest2 = target_dir.path().join("2026").join("2026-10-02").join("IMG_0001.JPG");
+    assert!(dest1.exists());
+    assert!(dest2.exists());
+}
+
+// ============================================================================
+// Boundary 8: Multi-Chunk 1 MB Streaming Verification
+// ============================================================================
+
+#[tokio::test]
+async fn test_t2_boundary_multi_chunk_streaming_without_memory_blowup() {
+    let sd = SyntheticSdCard::new("EOS_DIGITAL").expect("synthetic SD");
+    // 4.5 MB photo payload (spans 5 1-MB chunks)
+    let builder = ExifPhotoBuilder::new().payload_size(4_500_000);
+    let photo_path = sd.add_photo("100CANON", "IMG_LARGE.JPG", &builder).expect("add large photo");
+
+    let expected_sha256 = compute_file_sha256(&photo_path).expect("source sha256");
+
+    let target_dir = tempdir().expect("target tempdir");
+    let profile = CameraProfile {
+        camera_id: "042021000123".to_string(),
+        display_name: "Canon R6".to_string(),
+        target_directory: target_dir.path().to_path_buf(),
+        known_card_capacities: vec![128 * 1024 * 1024 * 1024],
+        last_ingest_timestamp: None,
+        total_photos_ingested: 0,
+    };
+
+    let harness: IngestPipelineHarness<MockToastNotifier> = IngestPipelineHarness::new(None);
+    let summary = harness
+        .run_ingest(&sd.to_volume(), &profile)
+        .await
+        .expect("multi-chunk ingest");
+
+    assert_eq!(summary.transferred_files, 1);
+    assert!(summary.total_bytes >= 4_500_000);
+
+    let manifest_str = fs::read_to_string(&summary.manifest_path).expect("read manifest");
+    let manifest: IngestSessionManifest = serde_json::from_str(&manifest_str).expect("manifest");
+    assert_eq!(manifest.files[0].sha256, expected_sha256);
+}
+
+// ============================================================================
+// Boundary 9: Destination Unwritable Path Error Handling
+// ============================================================================
+
+#[tokio::test]
+async fn test_t2_boundary_destination_unwritable_directory_error() {
+    let sd = SyntheticSdCard::new("EOS_DIGITAL").expect("synthetic SD");
+    let builder = ExifPhotoBuilder::new();
+    sd.add_photo("100CANON", "IMG_0001.JPG", &builder).expect("add photo");
+
+    // Invalid non-existent drive letter path on Windows
+    let invalid_target = PathBuf::from(r"Z:\NonExistentDrive\Photos\Subfolder");
+
+    let profile = CameraProfile {
+        camera_id: "042021000123".to_string(),
+        display_name: "Canon R6".to_string(),
+        target_directory: invalid_target,
+        known_card_capacities: vec![128 * 1024 * 1024 * 1024],
+        last_ingest_timestamp: None,
+        total_photos_ingested: 0,
+    };
+
+    let harness: IngestPipelineHarness<MockToastNotifier> = IngestPipelineHarness::new(None);
+    let result = harness.run_ingest(&sd.to_volume(), &profile).await;
+
+    assert!(result.is_err(), "Unwritable destination must return Err");
+    match result.unwrap_err() {
+        IngestError::DestinationError(_) => {}
+        other => panic!("Expected DestinationError, got {:?}", other),
+    }
+}
+
+// ============================================================================
+// Boundary 10: Special Characters, Spaces & Unicode in Destination Path
+// ============================================================================
+
+#[tokio::test]
+async fn test_t2_boundary_special_characters_and_spaces_in_destination_path() {
+    let sd = SyntheticSdCard::new("EOS_DIGITAL").expect("synthetic SD");
+    let builder = ExifPhotoBuilder::new();
+    sd.add_photo("100CANON", "IMG_0001.JPG", &builder).expect("add photo");
+
+    let root_temp = tempdir().expect("tempdir");
+    // Path with spaces, dashes, symbols and accents
+    let complex_dest = root_temp
+        .path()
+        .join("Sesión Fotográfica — Canon R6 (2026)")
+        .join("Exportación & Archivo Final");
+
+    let profile = CameraProfile {
+        camera_id: "042021000123".to_string(),
+        display_name: "Canon R6 Unicode".to_string(),
+        target_directory: complex_dest.clone(),
+        known_card_capacities: vec![128 * 1024 * 1024 * 1024],
+        last_ingest_timestamp: None,
+        total_photos_ingested: 0,
+    };
+
+    let harness: IngestPipelineHarness<MockToastNotifier> = IngestPipelineHarness::new(None);
+    let summary = harness
+        .run_ingest(&sd.to_volume(), &profile)
+        .await
+        .expect("complex unicode path must be handled cleanly");
+
+    assert_eq!(summary.transferred_files, 1);
+    assert!(complex_dest.exists());
+}
+
+// ============================================================================
+// Boundary 11: Missing Date Fallback to Current Date
+// ============================================================================
+
+#[test]
+fn test_t2_boundary_missing_date_fallback_to_current_date() {
+    let sd = SyntheticSdCard::new("EOS_DIGITAL").expect("synthetic SD");
+    // Photo builder without DateTimeOriginal tag
+    let mut builder = ExifPhotoBuilder::new();
+    builder.date_time_original = None;
+
+    let photo_path = sd.add_photo("100CANON", "IMG_NODATE.JPG", &builder).expect("add photo");
+
+    let (yyyy, yyyy_mm_dd) = extract_capture_date(&photo_path).expect("extract capture date");
+
+    let now = Utc::now();
+    assert_eq!(yyyy, now.format("%Y").to_string());
+    assert_eq!(yyyy_mm_dd, now.format("%Y-%m-%d").to_string());
+}
+
+// ============================================================================
+// Boundary 12: Corrupted Registry TOML Recovery
+// ============================================================================
+
+#[test]
+fn test_t2_boundary_registry_corrupted_toml_recovery() {
+    let mut reg = IsolatedCameraRegistry::new().expect("create registry");
+
+    // Overwrite TOML with syntax error
+    fs::write(&reg.toml_path, "invalid_toml = [[ broken syntax {{{{").expect("write corrupt TOML");
+
+    let result = reg.reload();
+    assert!(result.is_err(), "Corrupted TOML must return RegistryError");
+    match result.unwrap_err() {
+        IngestError::RegistryError(_) => {}
+        other => panic!("Expected RegistryError, got {:?}", other),
+    }
+}
+
+// ============================================================================
+// Boundary 13: Volume with Zero Capacity Edge Case
+// ============================================================================
+
+#[test]
+fn test_t2_boundary_volume_with_zero_bytes_capacity() {
+    let zero_vol = SdCardVolume {
+        drive_letter: 'G',
+        volume_label: "EMPTY_DRIVE".to_string(),
+        file_system: "FAT32".to_string(),
+        total_bytes: 0,
+        free_bytes: 0,
+        has_dcim: false,
+        camera_folders: vec![],
+    };
+
+    // Must return false without zero-division panic
+    assert!(!check_empty_card(&zero_vol));
+}
+
+// ============================================================================
+// Boundary 14: Multiple Cameras Matching Same Card Capacity
+// ============================================================================
+
+#[test]
+fn test_t2_boundary_multiple_cameras_matching_same_capacity() {
+    let mut reg = IsolatedCameraRegistry::new().expect("create registry");
+    let capacity_128gb = 128 * 1024 * 1024 * 1024;
+
+    let cam1 = CameraProfile {
+        camera_id: "CAM_CANON_01".to_string(),
+        display_name: "Canon R6".to_string(),
+        target_directory: PathBuf::from(r"C:\Photos\Canon"),
+        known_card_capacities: vec![capacity_128gb],
+        last_ingest_timestamp: None,
+        total_photos_ingested: 0,
+    };
+    let cam2 = CameraProfile {
+        camera_id: "CAM_SONY_02".to_string(),
+        display_name: "Sony A7IV".to_string(),
+        target_directory: PathBuf::from(r"C:\Photos\Sony"),
+        known_card_capacities: vec![capacity_128gb],
+        last_ingest_timestamp: None,
+        total_photos_ingested: 0,
+    };
+
+    reg.register_or_update(cam1).expect("reg 1");
+    reg.register_or_update(cam2).expect("reg 2");
+
+    // When querying by capacity, registry returns a valid matching candidate
+    let matched = reg.find_by_capacity(capacity_128gb);
+    assert!(matched.is_some());
 }

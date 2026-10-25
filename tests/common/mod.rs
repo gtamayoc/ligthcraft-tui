@@ -4,6 +4,11 @@
 
 pub mod cr3_integrity;
 pub mod mock_mcp;
+pub mod contracts;
+pub mod exif_gen;
+pub mod sd_fixture;
+pub mod registry_fixture;
+pub mod pipeline_harness;
 
 use std::path::PathBuf;
 use std::sync::Once;
