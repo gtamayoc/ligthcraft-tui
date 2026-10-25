@@ -82,10 +82,10 @@ pub fn find_matching_camera_by_capacity<'a>(
 }
 
 /// Return all camera profiles whose registered capacities match the given card capacity.
-pub fn find_all_matching_cameras_by_capacity<'a>(
+pub fn find_all_matching_cameras_by_capacity(
     total_bytes: u64,
-    profiles: &'a [CameraProfile],
-) -> Vec<&'a CameraProfile> {
+    profiles: &[CameraProfile],
+) -> Vec<&CameraProfile> {
     if total_bytes == 0 || profiles.is_empty() {
         return Vec::new();
     }

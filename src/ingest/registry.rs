@@ -145,7 +145,16 @@ impl CameraRegistry {
             });
         }
 
-        let content = fs::read_to_string(path).map_err(|e| {
+        let mut read_res = fs::read_to_string(path);
+        for attempt in 0..10 {
+            if read_res.is_ok() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis((attempt + 1) as u64));
+            read_res = fs::read_to_string(path);
+        }
+
+        let content = read_res.map_err(|e| {
             IngestError::Io(format!("Failed to read registry at '{}': {}", path.display(), e))
         })?;
 
